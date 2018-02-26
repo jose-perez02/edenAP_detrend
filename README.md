@@ -1,9 +1,9 @@
-# lcogtAP
+# edenAP
 
 This repository stores codes to perform aperture photometry on a set of images from 
-the LCOGT network. It supports data from all LCOGT sites.
+the EDEN survey. 
 
-Author: Néstor Espinoza (nsespino@uc.cl)
+It has been directly adapted from lcogtAP, created by Néstor Espinoza (nsespino@uc.cl)
 
 DEPENDENCIES
 ------------
