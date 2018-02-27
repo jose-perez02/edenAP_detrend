@@ -2,7 +2,7 @@
 import numpy as np
 import subprocess
 import urllib
-import pyfits
+import astropy.io.fits as pyfits
 import jdcal
 import shutil
 import glob
