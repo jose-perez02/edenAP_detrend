@@ -37,12 +37,12 @@ def read_setupfile():
     fin = open('../setup.dat','r')
     fpack_folder = ''
     astrometry_folder = ''
-    sendemail = False
+    SEND_EMAIL = False
     emailsender = ''
     emailsender_pwd = ''
     emailreceiver = ['']
-    astrometry = False
-    gfastrometry = False
+    ASTROMETRY = False
+    GF_ASTROMETRY = False
     done = False
     while True:
         line = fin.readline()
@@ -65,7 +65,7 @@ def read_setupfile():
                     res = res.split('\n')[0].strip()
                     if 'SENDEMAIL' == opt:
                         if res.lower() == 'true':
-                            sendemail = True
+                            SEND_EMAIL = True
                     if 'EMAILSENDER' == opt:
                             emailsender = res
                     if 'EMAILSENDER_PASSWORD' == opt:
@@ -84,22 +84,22 @@ def read_setupfile():
                     res = res.split('\n')[0].strip()
                     if opt == 'ASTROMETRY':
                         if res.lower() == 'true':
-                            astrometry = True
+                            ASTROMETRY = True
                     if opt == 'GFASTROMETRY':
                         if res.lower() == 'true':
-                            gfastrometry = True
+                            GF_ASTROMETRY = True
                 if line == '':
                     done = True
                     break
         if done:
             break
-    return fpack_folder,astrometry_folder,sendemail,emailsender,emailsender_pwd,\
-           emailreceiver,astrometry,gfastrometry
+    return fpack_folder,astrometry_folder,SEND_EMAIL,emailsender,emailsender_pwd,\
+           emailreceiver,ASTROMETRY,GF_ASTROMETRY
 
 class Bimail:
     def __init__(self,subject,recipients):
-        fpack_folder,astrometry_folder,sendemail,emailsender,emailsender_pwd,\
-        emailreceiver,astrometry,gfastrometry = read_setupfile()
+        fpack_folder,astrometry_folder,SEND_EMAIL,emailsender,emailsender_pwd,\
+        emailreceiver,ASTROMETRY,GF_ASTROMETRY = read_setupfile()
         self.subject = subject
         self.recipients = recipients
         self.htmlbody = ''
@@ -346,8 +346,8 @@ while True:
 
 data_folder = cf
 
-fpack_folder,astrometry_folder,sendemail,emailsender,emailsender_pwd,\
-emailreceiver,astrometry,gfastrometry = read_setupfile()
+fpack_folder,astrometry_folder,SEND_EMAIL,emailsender,emailsender_pwd,\
+emailreceiver,ASTROMETRY,GF_ASTROMETRY = read_setupfile()
 
 emails_to_send = emailreceiver #['nestor.espinozap@gmail.com','daniel.bayliss01@gmail.com','andres.jordan@gmail.com']
 
@@ -385,9 +385,9 @@ for i in range(len(dates_raw)):
         # Reduce the data (if already reduced, nothing will happen):
         print( '>> Reducing data for '+dates_raw[i]+' night. Reducing...' )
         optional_options = ''
-        if astrometry:
+        if ASTROMETRY:
             optional_options = ' --get_astrometry'
-        if gfastrometry:
+        if GF_ASTROMETRY:
             optional_options = optional_options+' --gf_opt_astrometry'
             
         os.system('python get_photometry_eden.py -project '+project+' -datafolder '+dates_raw[i]+optional_options) 
@@ -482,7 +482,7 @@ for i in range(len(dates_raw)):
                            camera = 'SBIG'
                            break
                 shutil.move(out_folder,out_folder+'_'+ap)
-                if sendemail:
+                if SEND_EMAIL:
                     if(p.returncode != 0 and p.returncode != None):
                         print( 'Error sending mail:' )
                         out, err = p.communicate()
@@ -513,7 +513,7 @@ for i in range(len(dates_raw)):
                     mymail.send()
               shutil.move(out_folder[:-3]+'_opt',data_folder+'red/'+dates_raw[i]+'/'+target+'/sinistro')
             else:
-                if sendemail:
+                if SEND_EMAIL:
                     mymail = Bimail('LCOGT DR (project: '+project+'): '+target_name+' on ' +datetime.now().strftime('%Y/%m/%d'), emails_to_send)
                     mymail.htmladd('Post-processing failed for object '+target+' on '+dates_raw[i])
                     mymail.send()

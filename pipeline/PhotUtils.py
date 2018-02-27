@@ -37,12 +37,12 @@ def read_setupfile():
     fin = open('../setup.dat','r')
     fpack_folder = ''
     astrometry_folder = ''
-    sendemail = False
+    SEND_EMAIL = False
     emailsender = ''
     emailsender_pwd = ''
     emailreceiver = ['']
-    astrometry = False
-    gfastrometry = False
+    ASTROMETRY = False
+    GF_ASTROMETRY = False
     done = False
     while True:
         line = fin.readline()
@@ -65,7 +65,7 @@ def read_setupfile():
                     res = res.split('\n')[0].strip()
                     if 'SENDEMAIL' == opt:
                         if res.lower() == 'true':
-                            sendemail = True
+                            SEND_EMAIL = True
                     if 'EMAILSENDER' == opt:
                             emailsender = res
                     if 'EMAILSENDER_PASSWORD' == opt:
@@ -84,21 +84,21 @@ def read_setupfile():
                     res = res.split('\n')[0].strip()
                     if opt == 'ASTROMETRY':
                         if res.lower() == 'true':
-                            astrometry = True
+                            ASTROMETRY = True
                     if opt == 'GFASTROMETRY':
                         if res.lower() == 'true':
-                            gfastrometry = True
+                            GF_ASTROMETRY = True
                 if line == '':
                     done = True
                     break
         if done:
             break
-    return fpack_folder,astrometry_folder,sendemail,emailsender,emailsender_pwd,\
-           emailreceiver,astrometry,gfastrometry
+    return fpack_folder,astrometry_folder,SEND_EMAIL,emailsender,emailsender_pwd,\
+           emailreceiver,ASTROMETRY,GF_ASTROMETRY
 
 
-fpack_folder,astrometry_folder,sendemail,emailsender,emailsender_pwd,\
-             emailreceiver,astrometry,gfastrometry = read_setupfile()
+fpack_folder,astrometry_folder,SEND_EMAIL,emailsender,emailsender_pwd,\
+             emailreceiver,ASTROMETRY,GF_ASTROMETRY = read_setupfile()
 
 # Define astrometry source directory:
 astrometry_directory = astrometry_folder # '/data/astrometry/bin/'
@@ -483,7 +483,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
                                         date = ''.join(h['DATE-OBS'].split('T')[0].split('-'))
                                     else:
                                         date = ''.join(h['DATE-OBS'].split('-'))
-                                    central_ra,central_dec = [h['CRVAL1']],[h['CRVAL2']]#CoordsToDecimal([[h['RA'].split()[0],h['DEC'].split()[0]]])
+                                    central_ra,central_dec = [h['RA']],[h['DEC']]#CoordsToDecimal([[h['RA'].split()[0],h['DEC'].split()[0]]])
                                     if not updating_dict:
                                         master_dict,all_names = get_dict(central_ra[0],central_dec[0],search_radius,ra_obj,dec_obj,\
                                                                         h,data.shape[1],data.shape[0], R,date=date)
