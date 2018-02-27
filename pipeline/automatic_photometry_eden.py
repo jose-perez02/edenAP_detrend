@@ -361,7 +361,6 @@ folders_red = glob.glob(data_folder+'red/*')
 dates_red = len(folders_red)*[[]]
 for i in range(len(folders_red)):
     dates_red[i] = folders_red[i].split('/')[-1]
-print(dates_raw, dates_red)
 
 # Run the get_photometry_lcogt code for all the raw folders in case new data from past nights was 
 # reduced by LCOGT today. If no new data, nothing will happen (i.e., the code does nothing):
@@ -378,7 +377,7 @@ for i in range(len(dates_raw)):
     # ~couple of days, but one week is the limit just to be sure):
     if data_jd > today_jd-ndays:
         # Get already reduced targets (if any):
-        bf = glob.glob(data_folder+'LCOGT/red/'+dates_raw[i]+'/*')
+        bf = glob.glob(data_folder+'red/'+dates_raw[i]+'/*')
         before_target_folders = []
         for tar_dir in bf:
             if os.path.exists(tar_dir+'/sinistro'):
@@ -395,7 +394,7 @@ for i in range(len(dates_raw)):
         # Now, assuming it is done, run the post-processing. First, switch to the post-processing folder:
         cwd = os.getcwd()
         os.chdir('../post_processing')
-        out_folder = data_folder+'LCOGT/red/'+dates_raw[i]+'/'
+        out_folder = data_folder+'red/'+dates_raw[i]+'/'
         target_folders = glob.glob(out_folder+'*')
         # First, go through every observed object for the given night:
         for target_folder in target_folders:
@@ -472,7 +471,7 @@ for i in range(len(dates_raw)):
                 p = subprocess.Popen(code,stdout = subprocess.PIPE, \
                            stderr = subprocess.PIPE,shell = True)
                 p.wait()
-                out = glob.glob(data_folder+'LCOGT/red/'+dates_raw[i]+'/'+target+'/*')
+                out = glob.glob(data_folder+'red/'+dates_raw[i]+'/'+target+'/*')
                 for ii in range(len(out)):
                        if out[ii].split('/')[-1] == 'sinistro':
                            out_folder = out[ii]
@@ -494,7 +493,7 @@ for i in range(len(dates_raw)):
                     out_folder = out_folder+'_'+ap
                     real_camera = 'sinistro' # from now on, all LCOGT data comes from sinistro cameras
                     imgs = glob.glob(out_folder+'/target/*')
-                    d,h = pyfits.getdata(data_folder+'LCOGT/raw/'+dates_raw[i]+'/'+(imgs[0].split('/')[-1]).split('.')[0]+'.fits',header=True)
+                    d,h = pyfits.getdata(data_folder+'raw/'+dates_raw[i]+'/'+(imgs[0].split('/')[-1]).split('.')[0]+'.fits',header=True)
                     mymail.htmladd('Camera: '+camera)
                     mymail.htmladd('Observing site: '+h['SITE'])
                     mymail.htmladd('Band: '+band)
@@ -512,7 +511,7 @@ for i in range(len(dates_raw)):
                     mymail.addattach([out_folder+'/'+target_name+'.pdf'])
                     mymail.addattach([out_folder+'/LC/'+target_name+'.epdlc'])
                     mymail.send()
-              shutil.move(out_folder[:-3]+'_opt',data_folder+'LCOGT/red/'+dates_raw[i]+'/'+target+'/sinistro')
+              shutil.move(out_folder[:-3]+'_opt',data_folder+'red/'+dates_raw[i]+'/'+target+'/sinistro')
             else:
                 mymail = Bimail('LCOGT DR (project: '+project+'): '+target_name+' on ' +datetime.now().strftime('%Y/%m/%d'), emails_to_send)
                 mymail.htmladd('Post-processing failed for object '+target+' on '+dates_raw[i])
