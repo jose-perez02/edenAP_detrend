@@ -121,14 +121,14 @@ class Bimail:
         s.login(self.sender,self.senderpass)
         s.sendmail(self.sender, self.recipients, msg.as_string())
         #test
-        print msg
+        print( msg )
         s.quit()
     
     def htmladd(self, html):
         self.htmlbody = self.htmlbody+'<p></p>'+html
  
     def attach(self,msg):
-                print self.attachments
+        print( self.attachments )
         for f in self.attachments:
         
             ctype, encoding = mimetypes.guess_type(f)
@@ -190,7 +190,7 @@ def get_login_data():
     return -1
 
 def get_hs_coords(s,target):
-            return -1
+    return -1
 
 def spaced(input,space):
     fixed = False
@@ -284,7 +284,7 @@ def get_general_coords(target,date):
             data_jd = sum(jdcal.gcal2jd(dt.year, dt.month, dt.day))
             deltat = (data_jd-2451544.5)/365.25
             # Calculate total PM:
-            print dec
+            print( dec )
             pmra = np.double(pmra)*deltat/15. # Conversion from arcsec to sec
             pmdec = np.double(pmdec)*deltat
             # Correct proper motion:
@@ -335,8 +335,8 @@ while True:
             if project.lower() == cp.lower():
                 break
     else:
-        print '\t > Project '+project+' is not on the list of saved projects. '
-        print '\t   Please associate it on the userdata.dat file.'
+        print( '\t > Project '+project+' is not on the list of saved projects. ' )
+        print( '\t   Please associate it on the userdata.dat file.' )
 
 data_folder = cf
 
@@ -375,7 +375,7 @@ for i in range(len(dates_raw)):
             if os.path.exists(tar_dir+'/sinistro'):
                 before_target_folders.append(tar_dir)
         # Reduce the data (if already reduced, nothing will happen):
-        print '>> Reducing data for '+dates_raw[i]+' night. Reducing...'
+        print( '>> Reducing data for '+dates_raw[i]+' night. Reducing...' )
         optional_options = ''
         if astrometry:
             optional_options = ' --get_astrometry'
@@ -393,7 +393,7 @@ for i in range(len(dates_raw)):
           # Post-process the target only if it has already not been done:
           if target_folder not in before_target_folders:
             target = target_folder.split('/')[-1]
-            print 'Post-processing target '+target+' on folder '+target_folder
+            print( 'Post-processing target '+target+' on folder '+target_folder )
             # If it is a HATS target, query to canditrack, get RA and DEC, and run the 
             # post-processing algorithm. If not, assume it is a K2 object whose EPIC
             # number is in 'target' (e.g., target = '214323253242-ip'). In that case, 
@@ -410,13 +410,13 @@ for i in range(len(dates_raw)):
                     first_HS_login = False
                 try:
                     RA,DEC = get_hs_coords(s,target_name)
-                    print '\t Found RA and DEC:',RA,DEC
+                    print( '\t Found RA and DEC:',RA,DEC )
                     targetok = True
                 except:
                     RA,DEC = get_general_coords(target_name,dates_raw[i])
                     if RA == 'NoneFound':
                         targetok = False
-                        print '\t RA and DEC obtention failed!'
+                        print( '\t RA and DEC obtention failed!' )
                     else:
                         targetok = True
             else:
@@ -436,7 +436,7 @@ for i in range(len(dates_raw)):
                     RA,DEC = get_epic_coords(target_name)
                     RA = ':'.join(RA.split())
                     DEC = ':'.join(DEC.split())
-                    print '\t Found RA and DEC:',RA,DEC
+                    print( '\t Found RA and DEC:',RA,DEC )
                     targetok = True
                 except:
                     RA,DEC = get_general_coords(target_name,dates_raw[i])
@@ -459,7 +459,7 @@ for i in range(len(dates_raw)):
                     code = 'python transit_photometry.py -project '+project+' -datafolder '+\
                            dates_raw[i]+' -target_name '+target_name+' -band '+band+\
                            ' -dome '+dome+' -ra "'+RA+'" -dec " '+DEC+'" -ncomp 10 --plt_images --force_aperture -forced_aperture '+ap+' --autosaveLC'
-                print code
+                print( code )
                 p = subprocess.Popen(code,stdout = subprocess.PIPE, \
                            stderr = subprocess.PIPE,shell = True)
                 p.wait()
@@ -476,10 +476,10 @@ for i in range(len(dates_raw)):
                 shutil.move(out_folder,out_folder+'_'+ap)
                 if sendemail:
                     if(p.returncode != 0 and p.returncode != None):
-                        print 'Error sending mail:'
+                        print( 'Error sending mail:' )
                         out, err = p.communicate()
-                        print spaced(err,"\t \t")
-                    print 'Sending e-mail...' 
+                        print( spaced(err,"\t \t") )
+                    print( 'Sending e-mail...' )
                     mymail = Bimail('LCOGT DR (project: '+project+'): '+target_name+' on ' +dates_raw[i]+' Aperture: '+ap, emails_to_send)
                     mymail.htmladd('Data reduction was a SUCCESS! Attached is the lightcurve data.')
                     out_folder = out_folder+'_'+ap
