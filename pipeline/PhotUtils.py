@@ -768,6 +768,8 @@ def SkyToPix(h,ras,decs):
     header information (h).
     """
     # Load WCS information:
+    h['EPOCH'] = float(h['EPOCH'])
+    h['EQUINOX'] = float(h['EQUINOX'])
     w = wcs.WCS(h)
     # Generate matrix that will contain sky coordinates:
     sky_coords = np.zeros([len(ras),2])
