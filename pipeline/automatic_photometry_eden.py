@@ -513,8 +513,9 @@ for i in range(len(dates_raw)):
                     mymail.send()
               shutil.move(out_folder[:-3]+'_opt',data_folder+'red/'+dates_raw[i]+'/'+target+'/sinistro')
             else:
-                mymail = Bimail('LCOGT DR (project: '+project+'): '+target_name+' on ' +datetime.now().strftime('%Y/%m/%d'), emails_to_send)
-                mymail.htmladd('Post-processing failed for object '+target+' on '+dates_raw[i])
-                mymail.send()
+                if sendemail:
+                    mymail = Bimail('LCOGT DR (project: '+project+'): '+target_name+' on ' +datetime.now().strftime('%Y/%m/%d'), emails_to_send)
+                    mymail.htmladd('Post-processing failed for object '+target+' on '+dates_raw[i])
+                    mymail.send()
         # Get back to photometric pipeline directory:
         os.chdir(cwd) 
