@@ -1,6 +1,6 @@
 # edenAP
 
-This repository stores codes to perform aperture photometry on a set of images from 
+This repository stores codes to perform aperture photometry on datasets from 
 the EDEN survey. 
 
 It has been directly adapted from lcogtAP, created by Néstor Espinoza (nsespino@uc.cl)
