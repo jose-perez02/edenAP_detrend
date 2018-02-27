@@ -1,4 +1,4 @@
-import pyfits
+import astropy.io.fits as pyfits
 import time as clocking_time
 import dateutil
 import glob
@@ -184,13 +184,13 @@ def get_planet_data(planet_data,target_object_name):
             break
         elif line[0] != '#':
             name,ra,dec = line.split()
-            print name,ra,dec
+            print( name,ra,dec )
             if target_object_name == name:
                 f.close()
                 return [[ra,dec]]
     f.close()
-    print 'Planet '+target_object_name+' not found in file '+planet_data
-    print 'Add it to the list and try running the code again.'
+    print( 'Planet '+target_object_name+' not found in file '+planet_data )
+    print( 'Add it to the list and try running the code again.' )
     sys.exit()
 
 from astroquery.irsa import Irsa
@@ -200,7 +200,7 @@ import astropy.units as u
 def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, h, x_max, y_max, R,\
         catalog = u'fp_psc',date='20180101'):
 
-    print '\t > Generating master dictionary for coordinates',central_ra,central_dec,'...'
+    print( '\t > Generating master dictionary for coordinates',central_ra,central_dec,'...' )
     # Make query to 2MASS:
     result = Irsa.query_region(coord.SkyCoord(central_ra,central_dec,unit=(u.deg,u.deg)),spatial = 'Cone',\
                                radius=central_radius*3600.*u.arcsec,catalog=catalog)
@@ -234,7 +234,7 @@ def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, h, x_max, y
     dt = dateutil.parser.parse(s)
     data_jd = sum(jdcal.gcal2jd(dt.year, dt.month, dt.day))
     deltat = (data_jd-2451544.5)/365.25
-    print '\t Correcting PPM for date '+date+', deltat: ',deltat,'...'
+    print( '\t Correcting PPM for date '+date+', deltat: ',deltat,'...' )
     for i in range(len(all_ra)):
         c_ra = all_ra[i]
         c_dec = all_dec[i]
@@ -249,7 +249,7 @@ def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, h, x_max, y
             all_dec[i] = all_dec[i] + deltat*decppm[min_idx]
             #if dist_hats < 3./3600.:
             #    print 'New RA DEC:',all_ra[i],all_dec[i]
-    print '\t Done.'
+    print( '\t Done.' )
 
     # Check which ras and decs have valid coordinates inside the first image. 
     # Save only those as valid objects for photometry:
@@ -411,7 +411,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
         times_method = 2
 
     else:
-	print 'ERROR: the selected observatory '+observatory+' is not supported.'
+	print( 'ERROR: the selected observatory '+observatory+' is not supported.' )
 	sys.exit()
 
     # Iterate through the files:
@@ -468,7 +468,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
                     if os.path.exists(filename+'.new') or not get_astrometry:
                             # If get_astrometry flag is on, prefer the generated file instead of the original:
                             if get_astrometry:
-                                print '\t Detected file '+filename+'.new'+'. Using it...'
+                                print( '\t Detected file '+filename+'.new'+'. Using it...' )
                                 hdulist = fits.open(filename+'.new')
                             else:
                                 hdulist = fits.open(filename+'.fits')
@@ -615,7 +615,7 @@ def organize_files(files,obj_name,filt,leaveout=''):
         try:
             d,h = pyfits.getdata(files[i],header=True)
         except:
-            print 'File '+files[i]+' probably corrupt. Skipping it'
+            print( 'File '+files[i]+' probably corrupt. Skipping it' )
             if i+1 == len(files):
                 break
             i = i + 1
@@ -635,15 +635,15 @@ def organize_files(files,obj_name,filt,leaveout=''):
         elif h['EXPTYPE'] == 'Bias':
                 unique_objects.append('Bias')#h['OBJECT'])
 
-    print '\t We found the following frames:'
+    print( '\t We found the following frames:' )
     for i in range(len(unique_objects)):
         counter = 0
         for obj in all_objects:
                 if obj == unique_objects[i]:
                         counter = counter + 1
-        print '\t   ('+str(i)+') '+unique_objects[i]+' ('+str(counter)+' frames)'
+        print( '\t   ('+str(i)+') '+unique_objects[i]+' ('+str(counter)+' frames)' )
 
-    print '\t Which ones are the (separate your selection with commas, e.g., 0,3,4)...'
+    print( '\t Which ones are the (separate your selection with commas, e.g., 0,3,4)...' )
     idx_biases = [int(i) for i in raw_input('\t ...biases?').split(',')]
     idx_dome_flats = [int(i) for i in raw_input('\t ...dome flats?').split(',')]
     idx_sky_flats = [int(i) for i in raw_input('\t ...sky flats?').split(',')]
