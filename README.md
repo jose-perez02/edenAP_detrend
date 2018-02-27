@@ -15,7 +15,8 @@ This code makes use of the following python libraries:
     + Pyfits.
     + Beautiful Soup (https://www.crummy.com/software/BeautifulSoup/bs4/doc/).
     + Astropy (http://www.astropy.org/).
-    + PhotUtils (http://photutils.readthedocs.io/).
+    + Photutils (http://photutils.readthedocs.io/).
+    + pyephem (https://pypi.python.org/pypi/pyephem/)
     + Astroquery (https://astroquery.readthedocs.io/en/latest/).
     + funpack (https://heasarc.gsfc.nasa.gov/fitsio/fpack/).
 
