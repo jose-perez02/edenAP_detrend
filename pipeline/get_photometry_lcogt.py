@@ -2,7 +2,7 @@
 import PhotUtils
 import argparse
 import pickle
-import pyfits
+import astropy.io.fits as pyfits
 import glob
 import sys
 import os
@@ -68,8 +68,8 @@ while True:
             if project.lower() == cp.lower():
                 break
     else:
-        print '\t > Project '+project+' is not on the list of saved projects. '
-        print '\t   Please associate it on the userdata.dat file.'
+        print( '\t > Project '+project+' is not on the list of saved projects. ' )
+        print( '\t   Please associate it on the userdata.dat file.' )
 
 out_raw_folder = cf + 'LCOGT/raw/'
 out_red_folder = cf + 'LCOGT/red/'
@@ -127,12 +127,12 @@ for i in range(len(files)):
                os.mkdir(out_folder)
       good_objects.append(i)
     except:
-        print 'File ',f,' is corrupted. Skipping it'
+        print( 'File ',f,' is corrupted. Skipping it' )
 files = [ files[i] for i in good_objects ]
 object_in_files = [ object_in_files[i] for i in good_objects ]
 
-print '\t Found ',len(all_objects),' object(s) for the observations under '+datafolder
-print '\t They are:',all_objects
+print( '\t Found ',len(all_objects),' object(s) for the observations under '+datafolder )
+print( '\t They are:',all_objects )
 
 print ('\t ###################################')
 print ('\t Going to photometric extraction....')
@@ -144,7 +144,7 @@ R = np.arange(min_aperture,max_aperture+1,aperture_step)
 # Get photometry for the objects:
 for i in range(len(all_objects)):
 	obj_name = all_objects[i]
-	print '\t Working on '+obj_name
+	print( '\t Working on '+obj_name )
 	out_data_folder = out_red_folder+'/'+datafolder+'/'+obj_name+'/'
         all_files = []
         for j in range(len(files)):
