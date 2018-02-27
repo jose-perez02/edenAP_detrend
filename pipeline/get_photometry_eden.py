@@ -96,8 +96,8 @@ if not os.path.exists(out_red_folder+datafolder+'/'):
         os.mkdir(out_red_folder+datafolder+'/')
 
 # Now, organize all observed objects in the given observing night:
-files = glob.glob(out_raw_folder+datafolder+'/*.fits')
-files_fz = glob.glob(out_raw_folder+datafolder+'/*.fits.fz')
+files = sorted(glob.glob(out_raw_folder+datafolder+'/*.fits'))
+files_fz = sorted(glob.glob(out_raw_folder+datafolder+'/*.fits.fz'))
 for i in range(len(files_fz)):
     fits_name = files_fz[i].split('.fz')[0]
     if fits_name not in files:
