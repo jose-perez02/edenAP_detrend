@@ -119,6 +119,10 @@ def TrimLim(s):
     return int(min_col),int(max_col),int(min_row),int(max_row)
 
 def site_data_2_string(sitelong,sitelat,sitealt):
+    try:
+        basestring
+    except NameError:
+        basestring = str
     if not isinstance(sitelong,basestring):
         longitude = str(int(modf(360.-sitelong)[1]))+':'+str(modf(360.-sitelong)[0]*60.)
     else:
@@ -409,6 +413,22 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
         t_scale_high = 0.8
         egain = 'HIERARCH ESO DET OUT1 GAIN'
         times_method = 2
+
+    elif observatory == 'VATT':
+        filter_h_name = 'FILTER'
+        long_h_name = None
+        lat_h_name = None
+        alt_h_name = None
+        sitelong = -109.892014
+        sitelat = 32.701303
+        sitealt = 3191
+        exptime_h_name = 'EXPTIME'
+        airmass_h_name = 'AIRMASS'
+        lst_h_name = 'ST'
+        t_scale_low = 0.83
+        t_scale_high = 0.83*3
+        egain = 1.9 # 'DETGAIN'
+        times_method = 3
 
     else:
         print( 'ERROR: the selected observatory '+observatory+' is not supported.' )

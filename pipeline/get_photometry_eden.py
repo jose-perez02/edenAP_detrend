@@ -53,10 +53,11 @@ args = parser.parse_args()
 
 # Get the project name (see the userdata.dat file):
 project = args.project
+observatory = project
 # Get datafolder/date of the observations that the user wants to reduce:
 datafolder = args.datafolder
 
-# Check for which project the user whishes to download data from:
+# Check for which project the user wishes to download data from:
 fprojects = open('../userdata.dat','r')
 while True:
     line = fprojects.readline()
@@ -160,20 +161,20 @@ for i in range(len(all_objects)):
     if not os.path.exists(out_data_folder+'photometry.pkl'):
        master_dict = None
     else:
-       master_dict = pickle.load(open(out_data_folder+'photometry.pkl','r'))
+       master_dict = pickle.load(open(out_data_folder+'photometry.pkl','rb'))
 
     # Get master dictionary for photometry:
     if 'Inter-American' in obj_name:
-       master_dict = PhotUtils.getPhotometry(all_files,'LCOGT',R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-3],\
+       master_dict = PhotUtils.getPhotometry(all_files,observatory,R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-3],\
                                           get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
                                           gf_opt = gf_opt_astrometry)
     else:
-       master_dict = PhotUtils.getPhotometry(all_files,'LCOGT',R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-2],\
+       master_dict = PhotUtils.getPhotometry(all_files,observatory,R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-2],\
                                           get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
                                           gf_opt = gf_opt_astrometry)
 
     # Save dictionary:
     print ('\t Saving photometry at '+out_data_folder+'...')
-    OUT_FILE = open(out_data_folder+'photometry.pkl','w')
+    OUT_FILE = open(out_data_folder+'photometry.pkl','wb')
     pickle.dump(master_dict,OUT_FILE)
     OUT_FILE.close() 
