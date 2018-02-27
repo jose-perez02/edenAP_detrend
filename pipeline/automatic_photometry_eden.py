@@ -345,11 +345,11 @@ emailreceiver,astrometry,gfastrometry = read_setupfile()
 
 emails_to_send = emailreceiver #['nestor.espinozap@gmail.com','daniel.bayliss01@gmail.com','andres.jordan@gmail.com']
 
-folders_raw = glob.glob(data_folder+'LCOGT/raw/*')
+folders_raw = glob.glob(data_folder+'raw/*')
 dates_raw = len(folders_raw)*[[]]
 for i in range(len(folders_raw)):
     dates_raw[i] = folders_raw[i].split('/')[-1]
-folders_red = glob.glob(data_folder+'LCOGT/red/*')
+folders_red = glob.glob(data_folder+'red/*')
 dates_red = len(folders_red)*[[]]
 for i in range(len(folders_red)):
     dates_red[i] = folders_red[i].split('/')[-1]
