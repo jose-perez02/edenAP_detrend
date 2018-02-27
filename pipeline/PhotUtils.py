@@ -411,8 +411,8 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
         times_method = 2
 
     else:
-	print( 'ERROR: the selected observatory '+observatory+' is not supported.' )
-	sys.exit()
+        print( 'ERROR: the selected observatory '+observatory+' is not supported.' )
+        sys.exit()
 
     # Iterate through the files:
     first_time = True
@@ -652,19 +652,19 @@ def organize_files(files,obj_name,filt,leaveout=''):
     for i in range(len(files)):
         for j in range(len(unique_objects)):
             if unique_objects[j] == all_objects[i]:
-		if leaveout != '':
-			im_name = files[i].split(leaveout)[0]
-		else:
-			im_name = files[i]
+                if leaveout != '':
+                    im_name = files[i].split(leaveout)[0]
+                else:
+                    im_name = files[i]
                 if j in idx_biases:
-                        bias.append(im_name)
+                    bias.append(im_name)
                 elif j in idx_dome_flats:
-                        dome_flats.append(im_name)
+                    dome_flats.append(im_name)
                 elif j in idx_sky_flats:
-                        sky_flats.append(im_name)
+                    sky_flats.append(im_name)
                 elif j in idx_science:
-			objects.append(im_name)
-                
+                    objects.append(im_name)
+
     return bias,dome_flats,sky_flats,objects
 
 def NormalizeFlat(MasterFlat):
@@ -757,9 +757,9 @@ def run_astrometry(filename,ra = None, dec = None, radius = None, scale_low = 0.
         sys.exit()
     else:
         if apply_gaussian_filter and os.path.exists(filename.split('.fits')[0]+'.new') and os.path.exists(filename):
-	   d,h = pyfits.getdata(filename,header=True)
-           dnew,hnew = pyfits.getdata(filename.split('.fits')[0]+'.new',header=True)
-           pyfits.writeto(true_filename.split('.fits')[0]+'.new',pyfits.getdata(true_filename),header=hnew)
+            d,h = pyfits.getdata(filename,header=True)
+            dnew,hnew = pyfits.getdata(filename.split('.fits')[0]+'.new',header=True)
+            pyfits.writeto(true_filename.split('.fits')[0]+'.new',pyfits.getdata(true_filename),header=hnew)
 
 from astropy import wcs
 def SkyToPix(h,ras,decs):
@@ -830,9 +830,9 @@ def getAperturePhotometry(d,h,x,y,R,target_names, frame_name = None, out_dir = N
     fwhm = np.zeros(len(x))
 
     if ncores is None:
-    	pool = mp.Pool(processes=4)
+        pool = mp.Pool(processes=4)
     else:
-	pool = mp.Pool(processes=ncores)
+        pool = mp.Pool(processes=ncores)
     results = pool.map(getCentroidsAndFluxes, range(len(x)))
     pool.terminate()
 
