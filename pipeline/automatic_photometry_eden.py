@@ -30,6 +30,9 @@ from email.mime.base import MIMEBase
 from email.mime.image import MIMEImage
 from email.mime.text import MIMEText
 
+########################################################################
+# Classes and functions
+
 def read_setupfile():
     fin = open('../setup.dat','r')
     fpack_folder = ''
@@ -312,6 +315,9 @@ def get_general_coords(target,date):
                 break
         coords_file.close()
         return 'NoneFound','NoneFound'
+
+########################################################################
+# Main procedure
 
 # Get user input:
 parserIO = argparse.ArgumentParser()
