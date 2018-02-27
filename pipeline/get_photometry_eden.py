@@ -71,8 +71,8 @@ while True:
         print( '\t > Project '+project+' is not on the list of saved projects. ' )
         print( '\t   Please associate it on the userdata.dat file.' )
 
-out_raw_folder = cf + 'LCOGT/raw/'
-out_red_folder = cf + 'LCOGT/red/'
+out_raw_folder = cf + 'raw/'
+out_red_folder = cf + 'red/'
 
 # Define apertures for aperture photometry:
 min_aperture = int(args.minap)
@@ -91,12 +91,12 @@ print ('\t ###################################')
 print ('\t Pre-processing....')
 print ('\t ###################################')
 
-if not os.path.exists(out_red_folder+'/'+datafolder+'/'):
-        os.mkdir(out_red_folder+'/'+datafolder+'/')
+if not os.path.exists(out_red_folder+datafolder+'/'):
+        os.mkdir(out_red_folder+datafolder+'/')
 
 # Now, organize all observed objects in the given observing night:
-files = glob.glob(out_raw_folder+'/'+datafolder+'/*.fits')
-files_fz = glob.glob(out_raw_folder+'/'+datafolder+'/*.fits.fz')
+files = glob.glob(out_raw_folder+datafolder+'/*.fits')
+files_fz = glob.glob(out_raw_folder+datafolder+'/*.fits.fz')
 for i in range(len(files_fz)):
     fits_name = files_fz[i].split('.fz')[0]
     if fits_name not in files:
@@ -111,21 +111,26 @@ for i in range(len(files)):
     f = files[i]
     #print f
     try:
-      d,h = pyfits.getdata(f,header=True)
-      if 'Observatory' in h['SITE'].split()[-1]:
-          obj_name = h['OBJECT']+'-'+h['FILTER']+'-'+h['SITE'].split()[-2]+h['SITE'].split()[-1]+h['ENCID']
-      else:
-          obj_name = h['OBJECT']+'-'+h['FILTER']+'-'+h['SITE'].split()[-1]+h['ENCID']
-      #print obj_name
-      object_in_files[i] = obj_name
-      if obj_name not in all_objects:
-          all_objects.append(obj_name)
-          all_ras.append(h['RA'])
-          all_decs.append(h['DEC'])
-          out_folder = out_red_folder+'/'+datafolder+'/'+obj_name
-          if not os.path.exists(out_folder):
-               os.mkdir(out_folder)
-      good_objects.append(i)
+        d,h = pyfits.getdata(f,header=True)
+        if 'VATT' in h['TELESCOP']:
+            telescope = 'VATT'
+            obj_name = '{:}-{:}-{:}'.format(h['OBJECT'], h['FILTER'], telescope)
+        else:
+            obj_name = '{:}-{:}'.format(h['OBJECT'], h['FILTER'])
+#         if 'Observatory' in h['SITE'].split()[-1]:
+#             obj_name = h['OBJECT']+'-'+h['FILTER']+'-'+h['SITE'].split()[-2]+h['SITE'].split()[-1]+h['ENCID']
+#         else:
+#             obj_name = h['OBJECT']+'-'+h['FILTER']+'-'+h['SITE'].split()[-1]+h['ENCID']
+#         print( obj_name )
+        object_in_files[i] = obj_name
+        if obj_name not in all_objects:
+            all_objects.append(obj_name)
+            all_ras.append(h['RA'])
+            all_decs.append(h['DEC'])
+            out_folder = out_red_folder+'/'+datafolder+'/'+obj_name
+            if not os.path.exists(out_folder):
+                os.mkdir(out_folder)
+        good_objects.append(i)
     except:
         print( 'File ',f,' is corrupted. Skipping it' )
 files = [ files[i] for i in good_objects ]
