@@ -355,10 +355,13 @@ folders_raw = glob.glob(data_folder+'raw/*')
 dates_raw = len(folders_raw)*[[]]
 for i in range(len(folders_raw)):
     dates_raw[i] = folders_raw[i].split('/')[-1]
+if not os.path.exists(data_folder+'red/'):
+    os.mkdir(data_folder+'red/')
 folders_red = glob.glob(data_folder+'red/*')
 dates_red = len(folders_red)*[[]]
 for i in range(len(folders_red)):
     dates_red[i] = folders_red[i].split('/')[-1]
+print(dates_raw, dates_red)
 
 # Run the get_photometry_lcogt code for all the raw folders in case new data from past nights was 
 # reduced by LCOGT today. If no new data, nothing will happen (i.e., the code does nothing):
@@ -388,7 +391,7 @@ for i in range(len(dates_raw)):
         if gfastrometry:
             optional_options = optional_options+' --gf_opt_astrometry'
             
-        os.system('python get_photometry_lcogt.py -project '+project+' -datafolder '+dates_raw[i]+optional_options) 
+        os.system('python get_photometry_eden.py -project '+project+' -datafolder '+dates_raw[i]+optional_options) 
         # Now, assuming it is done, run the post-processing. First, switch to the post-processing folder:
         cwd = os.getcwd()
         os.chdir('../post_processing')
