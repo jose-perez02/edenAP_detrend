@@ -143,32 +143,32 @@ R = np.arange(min_aperture,max_aperture+1,aperture_step)
 
 # Get photometry for the objects:
 for i in range(len(all_objects)):
-	obj_name = all_objects[i]
-	print( '\t Working on '+obj_name )
-	out_data_folder = out_red_folder+'/'+datafolder+'/'+obj_name+'/'
-        all_files = []
-        for j in range(len(files)):
-            if obj_name == object_in_files[j]:
-                all_files.append(files[j])
-        # Convert RA and DECs of object to decimal degrees:
-        ra_obj,dec_obj = PhotUtils.CoordsToDecimal([[all_ras[i],all_decs[i]]])
-        if not os.path.exists(out_data_folder+'photometry.pkl'):
-           master_dict = None
-        else:
-           master_dict = pickle.load(open(out_data_folder+'photometry.pkl','r'))
+    obj_name = all_objects[i]
+    print( '\t Working on '+obj_name )
+    out_data_folder = out_red_folder+'/'+datafolder+'/'+obj_name+'/'
+    all_files = []
+    for j in range(len(files)):
+        if obj_name == object_in_files[j]:
+            all_files.append(files[j])
+    # Convert RA and DECs of object to decimal degrees:
+    ra_obj,dec_obj = PhotUtils.CoordsToDecimal([[all_ras[i],all_decs[i]]])
+    if not os.path.exists(out_data_folder+'photometry.pkl'):
+       master_dict = None
+    else:
+       master_dict = pickle.load(open(out_data_folder+'photometry.pkl','r'))
 
-        # Get master dictionary for photometry:
-        if 'Inter-American' in obj_name:
-           master_dict = PhotUtils.getPhotometry(all_files,'LCOGT',R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-3],\
-                                              get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
-                                              gf_opt = gf_opt_astrometry)
-        else:
-           master_dict = PhotUtils.getPhotometry(all_files,'LCOGT',R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-2],\
-                                              get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
-                                              gf_opt = gf_opt_astrometry)
+    # Get master dictionary for photometry:
+    if 'Inter-American' in obj_name:
+       master_dict = PhotUtils.getPhotometry(all_files,'LCOGT',R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-3],\
+                                          get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
+                                          gf_opt = gf_opt_astrometry)
+    else:
+       master_dict = PhotUtils.getPhotometry(all_files,'LCOGT',R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-2],\
+                                          get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
+                                          gf_opt = gf_opt_astrometry)
 
-        # Save dictionary:
-        print ('\t Saving photometry at '+out_data_folder+'...')
-        OUT_FILE = open(out_data_folder+'photometry.pkl','w')
-        pickle.dump(master_dict,OUT_FILE)
-        OUT_FILE.close() 
+    # Save dictionary:
+    print ('\t Saving photometry at '+out_data_folder+'...')
+    OUT_FILE = open(out_data_folder+'photometry.pkl','w')
+    pickle.dump(master_dict,OUT_FILE)
+    OUT_FILE.close() 
