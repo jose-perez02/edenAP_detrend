@@ -112,10 +112,12 @@ for i in range(len(files)):
     f = files[i]
     #print f
     try:
-        d,h = pyfits.getdata(f,header=True)
-        if 'VATT' in h['TELESCOP']:
-            telescope = 'VATT'
-            obj_name = '{:}-{:}-{:}'.format(h['OBJECT'], h['FILTER'], telescope)
+        with pyfits.open(f) as hdulist:
+            d, h = hdulist[1].data, hdulist[0].header
+#         d,h = pyfits.getdata(f,header=True)
+        if project == 'VATT':
+            observatory = 'VATT'
+            obj_name = '{:}-{:}-{:}'.format(h['OBJECT'], h['FILTER'], observatory)
         else:
             obj_name = '{:}-{:}'.format(h['OBJECT'], h['FILTER'])
 #         if 'Observatory' in h['SITE'].split()[-1]:
@@ -124,6 +126,8 @@ for i in range(len(files)):
 #             obj_name = h['OBJECT']+'-'+h['FILTER']+'-'+h['SITE'].split()[-1]+h['ENCID']
 #         print( obj_name )
         object_in_files[i] = obj_name
+        if ('bias' in obj_name) or ('flat' in obj_name) or ('dark' in obj_name):
+            continue
         if obj_name not in all_objects:
             all_objects.append(obj_name)
             all_ras.append(h['RA'])
@@ -133,8 +137,13 @@ for i in range(len(files)):
                 os.mkdir(out_folder)
         good_objects.append(i)
     except:
-        print( 'File ',f,' is corrupted. Skipping it' )
+        raise
+#         print( 'File ',f,' is corrupted. Skipping it' )
 files = [ files[i] for i in good_objects ]
+for file in files:
+    if file.endswith('.wcs.fits'):
+        files.remove(file)
+
 object_in_files = [ object_in_files[i] for i in good_objects ]
 
 print( '\t Found ',len(all_objects),' object(s) for the observations under '+datafolder )
@@ -157,7 +166,7 @@ for i in range(len(all_objects)):
         if obj_name == object_in_files[j]:
             all_files.append(files[j])
     # Convert RA and DECs of object to decimal degrees:
-    ra_obj,dec_obj = PhotUtils.CoordsToDecimal([[all_ras[i],all_decs[i]]])
+    ra_obj, dec_obj = PhotUtils.CoordsToDecimal([[all_ras[i],all_decs[i]]])
     if not os.path.exists(out_data_folder+'photometry.pkl'):
        master_dict = None
     else:

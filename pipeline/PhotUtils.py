@@ -425,8 +425,8 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
         exptime_h_name = 'EXPTIME'
         airmass_h_name = 'AIRMASS'
         lst_h_name = 'ST'
-        t_scale_low = 0.83
-        t_scale_high = 0.83*3
+        t_scale_low = 0.188
+        t_scale_high = 0.188*4
         egain = 1.9 # 'DETGAIN'
         times_method = 3
 
@@ -477,33 +477,39 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
                 ########## OBTAINING THE ASTROMETRY ###############
                 # First, run astrometry on the current frame if not ran already:
                 filename = f.split('.fits')[0]
-                if not os.path.exists(filename+'.new') and get_astrometry:
+                if not os.path.exists(filename+'.wcs.fits') and get_astrometry:
                     print ('\t Running astrometry on frame '+f+'...')
-                    run_astrometry(f,ra = ra_obj[0], dec = dec_obj[0], radius = 0.15,\
+                    run_astrometry(f,ra = ra_obj[0], dec = dec_obj[0], radius = 0.5,\
                                    scale_low = t_scale_low,scale_high = t_scale_high, \
                                    apply_gaussian_filter = gf_opt)
                     print ('\t ...done!')
 
                 # Now get data if astrometry worked or if no astrometry was needed on the frame:
-                if os.path.exists(filename+'.new') or not get_astrometry:
+                if os.path.exists(filename+'.wcs.fits') or not get_astrometry:
                     # If get_astrometry flag is on, prefer the generated file instead of the original:
                     if get_astrometry:
-                        print( '\t Detected file '+filename+'.new'+'. Using it...' )
-                        hdulist = fits.open(filename+'.new')
+                        print( '\t Detected file '+filename+'.wcs.fits'+'. Using it...' )
+                        hdulist = fits.open(filename+'.wcs.fits')
                     else:
                         hdulist = fits.open(filename+'.fits')
 
                     # Load the data:
-                    h = hdulist[0].header
-                    data = hdulist[0].data
+                    h0 = hdulist[0].header
+                    h = hdulist[1].header
+#                     for entry in h1:
+#                         try:
+#                             h.append((entry, h1[entry]))
+#                         except ValueError:
+#                             continue
+                    data = hdulist[1].data # <------ This will need to be generalized
 
                     # Create master dictionary and define data to be used in the code:    
                     if first_time:
                         if times_method == 2:
-                            date = ''.join(h['DATE-OBS'].split('T')[0].split('-'))
+                            date = ''.join(h0['DATE-OBS'].split('T')[0].split('-'))
                         else:
-                            date = ''.join(h['DATE-OBS'].split('-'))
-                        central_ra,central_dec = [h['RA']],[h['DEC']]#CoordsToDecimal([[h['RA'].split()[0],h['DEC'].split()[0]]])
+                            date = ''.join(h0['DATE-OBS'].split('-'))
+                        central_ra, central_dec = CoordsToDecimal([[h0['RA'], h0['DEC']]])
                         if not updating_dict:
                             master_dict,all_names = get_dict(central_ra[0],central_dec[0],search_radius,ra_obj,dec_obj,\
                                                              h,data.shape[1],data.shape[0], R,date=date)
@@ -537,15 +543,15 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
                     ########## OBTAINING THE TIMES OF OBSERVATION ####################
                     # Get the BJD time. First, add exposure time:
                     if times_method == 1:
-                        utc_time = h['DATE-OBS']+'T-'+h['UT-TIME']
+                        utc_time = h0['DATE-OBS']+'T-'+h0['UT-TIME']
                     elif times_method == 2:
-                        utc_time = h['DATE-OBS']
+                        utc_time = h0['DATE-OBS']
                     elif times_method == 3:
-                        utc_time = h['DATE-OBS']+'T-'+h['TIME-OBS']
+                        utc_time = h0['DATE-OBS']+'T-'+h0['TIME-OBS']
 
                     # Get time at the center of the observations (initial + exptime/2):
                     t_center = mdates.date2num(dateutil.parser.parse(\
-                                               utc_time)) + (h[exptime_h_name]/(2.))*(1./(24.*3600.))
+                                               utc_time)) + (h0[exptime_h_name]/(2.))*(1./(24.*3600.))
 
                     # Convert back to string:
                     date = (mdates.num2date(t_center))
@@ -556,18 +562,15 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
                     t = Time(string_date, format='isot', scale='utc', \
                              location=(str(sitelong)+'d',str(sitelat)+'d',sitealt))
 
-                    try:
-                        coords = SkyCoord(h['RA'].split()[0]+' '+h['DEC'].split()[0], unit=(u.hourangle, u.deg))
-                    except:
-                        coords = SkyCoord(h['RA'],h['DEC'], unit='deg')
+                    coords = SkyCoord(h0['RA']+' '+h0['DEC'], unit=(u.hourangle, u.deg))
 
                     # Save UTC, exposure, JD and BJD and LS times. Save also the airmass:
                     master_dict['UTC_times'] = np.append(master_dict['UTC_times'],utc_time)
-                    master_dict['exptimes'] = np.append(master_dict['exptimes'],h[exptime_h_name])
+                    master_dict['exptimes'] = np.append(master_dict['exptimes'],h0[exptime_h_name])
                     master_dict['JD_times'] = np.append(master_dict['JD_times'],t.jd)
                     master_dict['BJD_times'] = np.append(master_dict['BJD_times'],((t.bcor(coords)).jd))
                     if lst_h_name is not None:
-                        master_dict['LST'] = np.append(master_dict['LST'],h[lst_h_name])
+                        master_dict['LST'] = np.append(master_dict['LST'],h0[lst_h_name])
                     else:
                         t.delta_ut1_utc = 0.
                         c_lst = str(t.sidereal_time('mean', 'greenwich'))
@@ -578,7 +581,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
                         ss = (c_lst[1])[:-1]
                         master_dict['LST'] = np.append(master_dict['LST'],hh+':'+mm+':'+ss)
                     if airmass_h_name is not None:
-                        master_dict['airmasses'] = np.append(master_dict['airmasses'],h[airmass_h_name])
+                        master_dict['airmasses'] = np.append(master_dict['airmasses'],h0[airmass_h_name])
                     else:
                         year,month,day,hh,mm,ss = getCalDay((t.bcor(coords)).jd)
                         day = getTime(year,month,day,hh,mm,ss)
@@ -627,7 +630,9 @@ def organize_files(files,obj_name,filt,leaveout=''):
     unique_objects = []
     for i in range(len(files)):
         try:
-            d,h = pyfits.getdata(files[i],header=True)
+            with pyfits.open(files[i]) as hdulist:
+                d, h = hdulist[1].data, hdulist[0].header
+#             d,h = pyfits.getdata(files[i],header=True)
         except:
             print( 'File '+files[i]+' probably corrupt. Skipping it' )
             if i+1 == len(files):
@@ -695,7 +700,9 @@ def MedianCombine(ImgList,MB=None,flatten_counts = False):
     if n==0:
         raise ValueError("empty list provided!")
 
-    data,h = pyfits.getdata(ImgList[0],header=True)
+    with pyfits.open(ImgList[0]) as hdulist:
+        d, h = hdulist[1].data, hdulist[1].header
+#     data,h = pyfits.getdata(ImgList[0],header=True)
     datasec1,datasec2 = h['DATASEC'][1:-1].split(',')
     ri,rf = datasec2.split(':')
     ci,cf = datasec1.split(':')
@@ -719,7 +726,9 @@ def MedianCombine(ImgList,MB=None,flatten_counts = False):
             return data/texp, ronoise, gain
     else:
         for i in range(n-1):
-            d,h = pyfits.getdata(ImgList[i+1],header=True)
+            with pyfits.open(ImgList[i+1]) as hdulist:
+                d, h = hdulist[1].data, hdulist[1].header
+#             d,h = pyfits.getdata(ImgList[i+1],header=True)
             datasec1,datasec2 = h['DATASEC'][1:-1].split(',')
             ri,rf = datasec2.split(':')
             ci,cf = datasec1.split(':')
@@ -734,7 +743,7 @@ def MedianCombine(ImgList,MB=None,flatten_counts = False):
                data = np.dstack((data,d/texp))
         return np.median(data,axis=2), ronoise, gain
 
-def run_astrometry(filename,ra = None, dec = None, radius = None, scale_low = 0.4,scale_high = 0.45, apply_gaussian_filter = False):
+def run_astrometry(filename, ra=None, dec=None, radius=None, scale_low= 0.1, scale_high=1., apply_gaussian_filter=False):
     """
     This code runs Astrometry.net on a frame.
 
@@ -742,39 +751,69 @@ def run_astrometry(filename,ra = None, dec = None, radius = None, scale_low = 0.
 
     * radius:     radius (in degrees) around the input guess ra,dec that astrometry should look for.
 
-    * scale_:     are scale limits (arcsec/pix) for the image.
+    * scale_[low, high]:     are scale limits (arcsec/pix) for the image.
     """
-
-    if apply_gaussian_filter:
-       true_filename = filename
-       d,h = pyfits.getdata(filename,header=True)
-       pyfits.writeto(filename.split('.fits')[0]+'_gf.fits',gaussian_filter(d,5),header=h)
-       filename = filename.split('.fits')[0]+'_gf.fits'
+    
+    h = pyfits.getheader(filename)
+    EXTEND = h['EXTEND']
+    if EXTEND:
+        exts = range(1, h['NEXTEND']+1)
+    else:
+        exts = [0]
+    
+    for ext in exts:
+        if apply_gaussian_filter:
+           true_filename = filename
+           filename = filename.replace('.fits', '_gf.fits')
+           with pyfits.open(filename) as hdulist:
+               d, h = hdulist[ext].data, hdulist[ext].header
+    #        d,h = pyfits.getdata(filename,header=True)
+           pyfits.writeto(filename,gaussian_filter(d,5),header=h)
+           
+        ext_fname = filename.replace('.fits', '_'+str(ext)+'.wcs.fits')
+        if (ra is not None) and (dec is not None) and (radius is not None):
+            p = subprocess.Popen(astrometry_directory+'solve-field --overwrite --extension '+ str(ext)+\
+                    ' --scale-units arcsecperpix --scale-low '+str(scale_low)+' --scale-high '+str(scale_high)+\
+                    ' --ra '+str(ra)+' --dec '+str(dec)+' --radius '+str(radius)+\
+                    ' --new-fits '+ext_fname+\
+                    ' '+filename, stdout = subprocess.PIPE, \
+                    stderr = subprocess.PIPE, shell = True)
+        else:
+            p = subprocess.Popen(astrometry_directory+'solve-field --overwrite --extension '+ str(ext)+\
+                    ' --scale-units arcsecperpix --scale-low '+str(scale_low)+' --scale-high '+str(scale_high)+\
+                    ' --new-fits '+ext_fname+\
+                    ' '+filename, stdout = subprocess.PIPE, \
+                    stderr = subprocess.PIPE, shell = True)
+        p.wait()
+        if(p.returncode != 0 and p.returncode != None):
+            print ('\t ASTROMETRY FAILED. The error was:')
+            out, err = p.communicate()
+            print (err)
+            print ('\n\t Exiting...\n')
+            sys.exit()
+        else:
+            if apply_gaussian_filter and os.path.exists(filename.replace('.fits', '.wcs.fits')) and os.path.exists(filename):
+                with pyfits.open(filename) as hdulist:
+                    d, h = hdulist[ext].data, hdulist[ext].header
+    #             d,h = pyfits.getdata(filename,header=True)
+                with pyfits.open(filename.replace('.fits', '.wcs.fits')) as hdulist:
+                    dnew, hnew = hdulist[ext].data, hdulist[ext].header
+    #             dnew,hnew = pyfits.getdata(filename.split('.fits')[0]+'.new',header=True)
+                with pyfits.open(true_filename) as hdulist:
+                    true_data = hdulist[ext].data
+                pyfits.writeto(true_filename.replace('.fits', '.wcs.fits'),true_data,header=hnew)
+    #             pyfits.writeto(true_filename.split('.fits')[0]+'.new',pyfits.getdata(true_filename),header=hnew)
+    
+    if EXTEND:
+        with pyfits.open(filename) as hdulist:
+            for ext in exts:
+                ext_fname = filename.replace('.fits', '_'+str(ext)+'.wcs.fits')
+                with pyfits.open(ext_fname) as hdulist_new:
+                    hdulist[ext].header = hdulist_new[1].header
+                os.remove(ext_fname)
+            hdulist.writeto(filename.replace('.fits', '.wcs.fits'))
         
-
-    if (ra is not None) and (dec is not None) and (radius is not None):
-        p = subprocess.Popen(astrometry_directory+'solve-field --no-plots --overwrite --scale-units arcsecperpix --scale-low '+str(scale_low)+\
-                ' --scale-high '+str(scale_high)+' --ra '+str(ra)+' --dec '+str(dec)+' --radius '+\
-                str(radius)+' '+filename, stdout = subprocess.PIPE, \
-                stderr = subprocess.PIPE, shell = True)
-    else:
-        p = subprocess.Popen(astrometry_directory+'solve-field --no-plots --overwrite --scale-units arcsecperpix --scale-low '+str(scale_low)+\
-                ' --scale-high '+str(scale_high)+' '+filename, stdout = subprocess.PIPE, \
-                stderr = subprocess.PIPE, shell = True)
-
-    p.wait()
-    if(p.returncode != 0 and p.returncode != None):
-        print ('\t ASTROMETRY FAILED. The error was:')
-        out, err = p.communicate()
-        print (err)
-        print ('\n\t Exiting...\n')
-        sys.exit()
-    else:
-        if apply_gaussian_filter and os.path.exists(filename.split('.fits')[0]+'.new') and os.path.exists(filename):
-            d,h = pyfits.getdata(filename,header=True)
-            dnew,hnew = pyfits.getdata(filename.split('.fits')[0]+'.new',header=True)
-            pyfits.writeto(true_filename.split('.fits')[0]+'.new',pyfits.getdata(true_filename),header=hnew)
-
+                        
 from astropy import wcs
 def SkyToPix(h,ras,decs):
     """
@@ -782,8 +821,8 @@ def SkyToPix(h,ras,decs):
     header information (h).
     """
     # Load WCS information:
-    h['EPOCH'] = float(h['EPOCH'])
-    h['EQUINOX'] = float(h['EQUINOX'])
+#     h['EPOCH'] = float(h['EPOCH'])
+#     h['EQUINOX'] = float(h['EQUINOX'])
     w = wcs.WCS(h)
     # Generate matrix that will contain sky coordinates:
     sky_coords = np.zeros([len(ras),2])
@@ -793,6 +832,8 @@ def SkyToPix(h,ras,decs):
         sky_coords[i,1] = decs[i]
     # Get pixel coordinates:
     pix_coords = w.wcs_world2pix(sky_coords, 1)
+#     for i in range(len(pix_coords)):
+#         print(sky_coords[i], pix_coords[i])
     # Return x,y pixel coordinates:
     return pix_coords[:,0],pix_coords[:,1]
 
