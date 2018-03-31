@@ -128,7 +128,7 @@ for i in range(len(files)):
 #             obj_name = h['OBJECT']+'-'+h['FILTER']+'-'+h['SITE'].split()[-2]+h['SITE'].split()[-1]+h['ENCID']
 #         else:
 #             obj_name = h['OBJECT']+'-'+h['FILTER']+'-'+h['SITE'].split()[-1]+h['ENCID']
-        print( obj_name )
+#         print( obj_name )
         object_in_files[i] = obj_name
         if ('bias' in obj_name) or ('flat' in obj_name) or ('dark' in obj_name):
             continue
