@@ -114,6 +114,10 @@ for i in range(len(files)):
     try:
         with pyfits.open(f) as hdulist:
             d, h = hdulist[1].data, hdulist[0].header
+    except:
+        print( 'File ',f,' is corrupted. Skipping it' )
+        raise
+    else:
 #         d,h = pyfits.getdata(f,header=True)
         if project == 'VATT':
             observatory = 'VATT'
@@ -124,7 +128,7 @@ for i in range(len(files)):
 #             obj_name = h['OBJECT']+'-'+h['FILTER']+'-'+h['SITE'].split()[-2]+h['SITE'].split()[-1]+h['ENCID']
 #         else:
 #             obj_name = h['OBJECT']+'-'+h['FILTER']+'-'+h['SITE'].split()[-1]+h['ENCID']
-#         print( obj_name )
+        print( obj_name )
         object_in_files[i] = obj_name
         if ('bias' in obj_name) or ('flat' in obj_name) or ('dark' in obj_name):
             continue
@@ -136,9 +140,7 @@ for i in range(len(files)):
             if not os.path.exists(out_folder):
                 os.mkdir(out_folder)
         good_objects.append(i)
-    except:
-        raise
-#         print( 'File ',f,' is corrupted. Skipping it' )
+
 files = [ files[i] for i in good_objects ]
 for file in files:
     if file.endswith('.wcs.fits'):
@@ -173,12 +175,7 @@ for i in range(len(all_objects)):
        master_dict = pickle.load(open(out_data_folder+'photometry.pkl','rb'))
 
     # Get master dictionary for photometry:
-    if 'Inter-American' in obj_name:
-       master_dict = PhotUtils.getPhotometry(all_files,observatory,R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-3],\
-                                          get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
-                                          gf_opt = gf_opt_astrometry)
-    else:
-       master_dict = PhotUtils.getPhotometry(all_files,observatory,R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-2],\
+    master_dict = PhotUtils.getPhotometry(all_files,observatory,R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-2],\
                                           get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
                                           gf_opt = gf_opt_astrometry)
 
