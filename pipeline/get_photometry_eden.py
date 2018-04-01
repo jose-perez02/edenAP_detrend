@@ -105,7 +105,7 @@ for i in range(len(files_fz)):
 all_objects = [] # This saves all the objects
 all_ras = []     # This saves the RA of each object
 all_decs = []    # This saves the DEC of each object
-object_in_files = len(files)*[''] # This saves what object is on each file
+object_in_files = len(files)*[''] # This saves what object is in each file
 
 good_objects = []
 for i in range(len(files)):
@@ -113,17 +113,17 @@ for i in range(len(files)):
     #print f
     try:
         with pyfits.open(f) as hdulist:
-            d, h = hdulist[1].data, hdulist[0].header
+            d, h0 = hdulist[1].data, hdulist[0].header
     except:
         print( 'File ',f,' is corrupted. Skipping it' )
         raise
     else:
-#         d,h = pyfits.getdata(f,header=True)
         if project == 'VATT':
             observatory = 'VATT'
-            obj_name = '{:}-{:}-{:}'.format(h['OBJECT'], h['FILTER'], observatory)
+            target = 'SDSS_J120032.85+204852.7'
+            obj_name = '{:}-{:}-{:}'.format(target, h0['FILTER'], 'VATT')
         else:
-            obj_name = '{:}-{:}'.format(h['OBJECT'], h['FILTER'])
+            obj_name = '{:}-{:}'.format(h0['OBJECT'], h0['FILTER'])
 #         if 'Observatory' in h['SITE'].split()[-1]:
 #             obj_name = h['OBJECT']+'-'+h['FILTER']+'-'+h['SITE'].split()[-2]+h['SITE'].split()[-1]+h['ENCID']
 #         else:
@@ -134,9 +134,13 @@ for i in range(len(files)):
             continue
         if obj_name not in all_objects:
             all_objects.append(obj_name)
-            all_ras.append(h['RA'])
-            all_decs.append(h['DEC'])
-            out_folder = out_red_folder+'/'+datafolder+'/'+obj_name
+            RA, DEC = PhotUtils.get_general_coords(target, h0['DATE-OBS'])
+            if RA=='NoneFound':
+                RA = h0['RA']
+                DEC = h0['DEC']
+            all_ras.append(RA)
+            all_decs.append(DEC)
+            out_folder = out_red_folder+datafolder+'/'+obj_name
             if not os.path.exists(out_folder):
                 os.mkdir(out_folder)
         good_objects.append(i)
@@ -162,7 +166,7 @@ R = np.arange(min_aperture,max_aperture+1,aperture_step)
 for i in range(len(all_objects)):
     obj_name = all_objects[i]
     print( '\t Working on '+obj_name )
-    out_data_folder = out_red_folder+'/'+datafolder+'/'+obj_name+'/'
+    out_data_folder = out_red_folder+datafolder+'/'+obj_name+'/'
     all_files = []
     for j in range(len(files)):
         if obj_name == object_in_files[j]:
@@ -170,9 +174,10 @@ for i in range(len(all_objects)):
     # Convert RA and DECs of object to decimal degrees:
     ra_obj, dec_obj = PhotUtils.CoordsToDecimal([[all_ras[i],all_decs[i]]])
     if not os.path.exists(out_data_folder+'photometry.pkl'):
-       master_dict = None
+        master_dict = None
     else:
-       master_dict = pickle.load(open(out_data_folder+'photometry.pkl','rb'))
+        print('\t Found photometry.pkl')
+        master_dict = pickle.load(open(out_data_folder+'photometry.pkl','rb'))
 
     # Get master dictionary for photometry:
     master_dict = PhotUtils.getPhotometry(all_files,observatory,R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-2],\
