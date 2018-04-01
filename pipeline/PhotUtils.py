@@ -321,6 +321,7 @@ from astropy.io import fits
 def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_filter,\
                   get_astrometry=True,sitelong=None,sitelat=None,sitealt=None,refine_cen=False,\
                   master_dict=None, gf_opt = False):
+
     # Define radius in which to search for targets (in degrees):
     search_radius = 0.25
 
@@ -437,8 +438,6 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
     # Iterate through the files:
     first_time = True
     for f in filenames:
-        # Try opening the fits file (might be corrupt):
-        #print f
         # Decompress file. Necessary because Astrometry cant handle this:
         if f[-7:] == 'fits.fz':
             p = subprocess.Popen(fpack_folder+'funpack '+f, stdout = subprocess.PIPE, \
@@ -451,10 +450,12 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
                 print ('\n\t Exiting...\n')
                 sys.exit()
             f = f[:-3]
+        # Try opening the fits file (might be corrupt):
         try:
             hdulist = fits.open(f)
             fitsok = True
         except:
+            print('\t Encountered error opening {:}'.format(f))
             fitsok = False
 
         # If frame already reduced, skip it:
@@ -462,13 +463,14 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
             if f in master_dict['frame_name']:
                 fitsok = False
         if fitsok:
-            h = hdulist[0].header
+            h0 = hdulist[0].header  # primary fits header
+            exts = get_exts(f)
             # Check filter:
             filter_ok = False
             if use_filter is None:
                 filter_ok = True
             else:
-                if use_filter == h[filter_h_name]:
+                if use_filter == h0[filter_h_name]:
                     filter_ok = True
 
             if filter_ok:
@@ -479,9 +481,9 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
                 filename = f.split('.fits')[0]
                 if not os.path.exists(filename+'.wcs.fits') and get_astrometry:
                     print ('\t Running astrometry on frame '+f+'...')
-                    run_astrometry(f,ra = ra_obj[0], dec = dec_obj[0], radius = 0.5,\
-                                   scale_low = t_scale_low,scale_high = t_scale_high, \
-                                   apply_gaussian_filter = gf_opt)
+                    run_astrometry(f, ra=ra_obj[0], dec=dec_obj[0], radius=0.5,\
+                                   scale_low=t_scale_low, scale_high=t_scale_high, \
+                                   apply_gaussian_filter=gf_opt)
                     print ('\t ...done!')
 
                 # Now get data if astrometry worked or if no astrometry was needed on the frame:
@@ -494,13 +496,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
                         hdulist = fits.open(filename+'.fits')
 
                     # Load the data:
-                    h0 = hdulist[0].header
                     h = hdulist[1].header
-#                     for entry in h1:
-#                         try:
-#                             h.append((entry, h1[entry]))
-#                         except ValueError:
-#                             continue
                     data = hdulist[1].data # <------ This will need to be generalized
 
                     # Create master dictionary and define data to be used in the code:    
@@ -510,6 +506,8 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
                         else:
                             date = ''.join(h0['DATE-OBS'].split('-'))
                         central_ra, central_dec = CoordsToDecimal([[h0['RA'], h0['DEC']]])
+                        print (central_ra, central_dec)
+                        print (ra_obj, dec_obj)
                         if not updating_dict:
                             master_dict,all_names = get_dict(central_ra[0],central_dec[0],search_radius,ra_obj,dec_obj,\
                                                              h,data.shape[1],data.shape[0], R,date=date)
@@ -618,7 +616,6 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
                                 np.append(master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap'],fluxes[i,j])
                             master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap_err'] = \
                                 np.append(master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap_err'],errors[i,j])
-
     return master_dict
 
 def organize_files(files,obj_name,filt,leaveout=''):
@@ -742,7 +739,7 @@ def MedianCombine(ImgList,MB=None,flatten_counts = False):
             else:
                data = np.dstack((data,d/texp))
         return np.median(data,axis=2), ronoise, gain
-
+ 
 def run_astrometry(filename, ra=None, dec=None, radius=None, scale_low= 0.1, scale_high=1., apply_gaussian_filter=False):
     """
     This code runs Astrometry.net on a frame.
@@ -754,20 +751,16 @@ def run_astrometry(filename, ra=None, dec=None, radius=None, scale_low= 0.1, sca
     * scale_[low, high]:     are scale limits (arcsec/pix) for the image.
     """
     
-    h = pyfits.getheader(filename)
-    EXTEND = h['EXTEND']
-    if EXTEND:
-        exts = range(1, h['NEXTEND']+1)
-    else:
-        exts = [0]
+    exts = get_exts(filename)
+    print('\t\t Found {:} extensions'.format(len(exts)))
     
     for ext in exts:
+        print('\t\t Working on extension {:}...'.format(ext))
         if apply_gaussian_filter:
            true_filename = filename
            filename = filename.replace('.fits', '_gf.fits')
            with pyfits.open(filename) as hdulist:
                d, h = hdulist[ext].data, hdulist[ext].header
-    #        d,h = pyfits.getdata(filename,header=True)
            pyfits.writeto(filename,gaussian_filter(d,5),header=h)
            
         ext_fname = filename.replace('.fits', '_'+str(ext)+'.wcs.fits')
@@ -795,23 +788,21 @@ def run_astrometry(filename, ra=None, dec=None, radius=None, scale_low= 0.1, sca
             if apply_gaussian_filter and os.path.exists(filename.replace('.fits', '.wcs.fits')) and os.path.exists(filename):
                 with pyfits.open(filename) as hdulist:
                     d, h = hdulist[ext].data, hdulist[ext].header
-    #             d,h = pyfits.getdata(filename,header=True)
                 with pyfits.open(filename.replace('.fits', '.wcs.fits')) as hdulist:
                     dnew, hnew = hdulist[ext].data, hdulist[ext].header
-    #             dnew,hnew = pyfits.getdata(filename.split('.fits')[0]+'.new',header=True)
                 with pyfits.open(true_filename) as hdulist:
                     true_data = hdulist[ext].data
                 pyfits.writeto(true_filename.replace('.fits', '.wcs.fits'),true_data,header=hnew)
-    #             pyfits.writeto(true_filename.split('.fits')[0]+'.new',pyfits.getdata(true_filename),header=hnew)
     
-    if EXTEND:
-        with pyfits.open(filename) as hdulist:
-            for ext in exts:
-                ext_fname = filename.replace('.fits', '_'+str(ext)+'.wcs.fits')
-                with pyfits.open(ext_fname) as hdulist_new:
-                    hdulist[ext].header = hdulist_new[1].header
-                os.remove(ext_fname)
-            hdulist.writeto(filename.replace('.fits', '.wcs.fits'))
+    # Astrometry.net is run on individual extensions, which are saved above.
+    # Combining them back into a single file.
+    with pyfits.open(filename) as hdulist:
+        for ext in exts:
+            ext_fname = filename.replace('.fits', '_'+str(ext)+'.wcs.fits')
+            with pyfits.open(ext_fname) as hdulist_new:
+                hdulist[ext].header = hdulist_new[1].header
+            os.remove(ext_fname)
+        hdulist.writeto(filename.replace('.fits', '.wcs.fits'))
         
                         
 from astropy import wcs
@@ -1252,3 +1243,75 @@ class Time(time.Time):
         #print 'Correction to add to get time at barycentre  = %.7f s' % tcor_bar
         dt = time.TimeDelta(tcor_bar, format='sec', scale='tdb')
         return self.tdb + dt
+
+def get_exts(filename):
+    """
+    Returns a list of the fits extensions containing data
+    """
+    h = pyfits.getheader(filename)
+    EXTEND = h['EXTEND']
+    if EXTEND:
+        exts = range(1, h['NEXTEND']+1)
+    else:
+        exts = [0]
+    return exts
+
+def get_general_coords(target,date):
+    """
+    Given a target name, returns RA and DEC from simbad.
+    """
+    try:
+        url = "http://simbad.u-strasbg.fr/simbad/sim-id?Ident="+target+"&NbIdent=1&Radius=2&Radius.unit=arcmin&submit=submit+id"
+        html = urllib.urlopen(url).read()
+        splt = html.split('ICRS')
+        spltpp = html.split('Proper motions')
+        rahh,ramm,rass,decdd,decmm,decss = (splt[1].split('<TT>\n')[1].split('\n')[0]).split()
+        if len(spltpp)==1:
+            return rahh+':'+ramm+':'+rass,decdd+':'+decmm+':'+decss
+        else:
+            linesplitpp = (spltpp[1].split('<TT>\n')[1].split('\n')[0]).split()
+            pmra,pmdec = linesplitpp[0],linesplitpp[1]
+            # Convert RA and DEC to whole numbers:
+            ra = np.double(rahh)+(np.double(ramm)/60.)+(np.double(rass)/3600.)
+            if np.double(decdd)<0:
+                dec = np.double(decdd)-(np.double(decmm)/60.)-(np.double(decss)/3600.)
+            else:
+                dec = np.double(decdd)+(np.double(decmm)/60.)+(np.double(decss)/3600.)
+            # Calculate time difference from J2000:
+            year = int(date[:4])
+            month = int(date[4:6])
+            day = int(date[6:8])
+            s = str(year)+'.'+str(month)+'.'+str(day)
+            dt = parser.parse(s)
+            data_jd = sum(jdcal.gcal2jd(dt.year, dt.month, dt.day))
+            deltat = (data_jd-2451544.5)/365.25
+            # Calculate total PM:
+            print( dec )
+            pmra = np.double(pmra)*deltat/15. # Conversion from arcsec to sec
+            pmdec = np.double(pmdec)*deltat
+            # Correct proper motion:
+            c_ra = ra + ((pmra*1e-3)/3600.)
+            c_dec = dec + ((pmdec*1e-3)/3600.)
+            # Return RA and DEC:
+            ra_hr = int(c_ra)
+            ra_min = int((c_ra - ra_hr)*60.)
+            ra_sec = (c_ra - ra_hr - ra_min/60.0)*3600.
+            dec_deg = int(c_dec)
+            dec_min = int(np.abs(c_dec-dec_deg)*60.)
+            dec_sec = (np.abs(c_dec-dec_deg)-dec_min/60.)*3600.
+            return NumToStr(ra_hr)+':'+NumToStr(ra_min)+':'+NumToStr(ra_sec,roundto=3),\
+                   NumToStr(dec_deg)+':'+NumToStr(dec_min)+':'+NumToStr(dec_sec,roundto=3)
+    except:
+        coords_file = open('../manual_object_coords.dat','r')
+        while True:
+            line = coords_file.readline()
+            if line != '':
+                name,ra,dec = line.split()
+                if name.lower() == target.lower():
+                    coords_file.close()
+                    return ra,dec
+            else:
+                break
+        coords_file.close()
+        return 'NoneFound','NoneFound'
+    

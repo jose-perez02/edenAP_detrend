@@ -8,6 +8,7 @@ import shutil
 import glob
 import os
 import argparse
+import PhotUtils
 
 import matplotlib
 # Force matplotlib to not use any Xwindows backend.
@@ -257,65 +258,6 @@ def NumToStr(number,roundto=None):
     else:
         return str_number
 
-def get_general_coords(target,date):
-    """
-    Given a target name, returns RA and DEC from simbad.
-    """
-    try:
-        url = "http://simbad.u-strasbg.fr/simbad/sim-id?Ident="+target+"&NbIdent=1&Radius=2&Radius.unit=arcmin&submit=submit+id"
-        html = urllib.urlopen(url).read()
-        splt = html.split('ICRS')
-        spltpp = html.split('Proper motions')
-        rahh,ramm,rass,decdd,decmm,decss = (splt[1].split('<TT>\n')[1].split('\n')[0]).split()
-        if len(spltpp)==1:
-            return rahh+':'+ramm+':'+rass,decdd+':'+decmm+':'+decss
-        else:
-            linesplitpp = (spltpp[1].split('<TT>\n')[1].split('\n')[0]).split()
-            pmra,pmdec = linesplitpp[0],linesplitpp[1]
-            # Convert RA and DEC to whole numbers:
-            ra = np.double(rahh)+(np.double(ramm)/60.)+(np.double(rass)/3600.)
-            if np.double(decdd)<0:
-                dec = np.double(decdd)-(np.double(decmm)/60.)-(np.double(decss)/3600.)
-            else:
-                dec = np.double(decdd)+(np.double(decmm)/60.)+(np.double(decss)/3600.)
-            # Calculate time difference from J2000:
-            year = int(date[:4])
-            month = int(date[4:6])
-            day = int(date[6:8])
-            s = str(year)+'.'+str(month)+'.'+str(day)
-            dt = parser.parse(s)
-            data_jd = sum(jdcal.gcal2jd(dt.year, dt.month, dt.day))
-            deltat = (data_jd-2451544.5)/365.25
-            # Calculate total PM:
-            print( dec )
-            pmra = np.double(pmra)*deltat/15. # Conversion from arcsec to sec
-            pmdec = np.double(pmdec)*deltat
-            # Correct proper motion:
-            c_ra = ra + ((pmra*1e-3)/3600.)
-            c_dec = dec + ((pmdec*1e-3)/3600.)
-            # Return RA and DEC:
-            ra_hr = int(c_ra)
-            ra_min = int((c_ra - ra_hr)*60.)
-            ra_sec = (c_ra - ra_hr - ra_min/60.0)*3600.
-            dec_deg = int(c_dec)
-            dec_min = int(np.abs(c_dec-dec_deg)*60.)
-            dec_sec = (np.abs(c_dec-dec_deg)-dec_min/60.)*3600.
-            return NumToStr(ra_hr)+':'+NumToStr(ra_min)+':'+NumToStr(ra_sec,roundto=3),\
-                   NumToStr(dec_deg)+':'+NumToStr(dec_min)+':'+NumToStr(dec_sec,roundto=3)
-    except:
-        coords_file = open('../manual_object_coords.dat','r')
-        while True:
-            line = coords_file.readline()
-            if line != '':
-                name,ra,dec = line.split()
-                if name.lower() == target.lower():
-                    coords_file.close()
-                    return ra,dec
-            else:
-                break
-        coords_file.close()
-        return 'NoneFound','NoneFound'
-
 ########################################################################
 # Main procedure
 
@@ -421,7 +363,7 @@ for i in range(len(dates_raw)):
                     print( '\t Found RA and DEC:',RA,DEC )
                     targetok = True
                 except:
-                    RA,DEC = get_general_coords(target_name,dates_raw[i])
+                    RA,DEC = PhotUtils.get_general_coords(target_name,dates_raw[i])
                     if RA == 'NoneFound':
                         targetok = False
                         print( '\t RA and DEC obtention failed!' )
@@ -447,7 +389,7 @@ for i in range(len(dates_raw)):
                     print( '\t Found RA and DEC:',RA,DEC )
                     targetok = True
                 except:
-                    RA,DEC = get_general_coords(target_name,dates_raw[i])
+                    RA,DEC = PhotUtils.get_general_coords(target_name,dates_raw[i])
                     if RA == 'NoneFound':
                         targetok = False
                     else:
@@ -481,7 +423,8 @@ for i in range(len(dates_raw)):
                            out_folder = out[ii]
                            camera = 'SBIG'
                            break
-                shutil.move(out_folder,out_folder+'_'+ap)
+                print(out_folder)
+                shutil.move(out_folder,out_folder.rstrip('/')+'_'+ap+'/')
                 if SEND_EMAIL:
                     if(p.returncode != 0 and p.returncode != None):
                         print( 'Error sending mail:' )
@@ -493,9 +436,10 @@ for i in range(len(dates_raw)):
                     out_folder = out_folder+'_'+ap
                     real_camera = 'sinistro' # from now on, all LCOGT data comes from sinistro cameras
                     imgs = sorted(glob.glob(out_folder+'/target/*'))
-                    d,h = pyfits.getdata(data_folder+'raw/'+dates_raw[i]+'/'+(imgs[0].split('/')[-1]).split('.')[0]+'.fits',header=True)
+#                     f = data_folder+'raw/'+dates_raw[i]+'/'+(imgs[0].split('/')[-1]).split('.')[0]+'.fits'
+#                     d,h = pyfits.getdata(f, header=True)
                     mymail.htmladd('Camera: '+camera)
-                    mymail.htmladd('Observing site: '+h['SITE'])
+#                     mymail.htmladd('Observing site: '+h['SITE'])
                     mymail.htmladd('Band: '+band)
                     mymail.htmladd('Dome: '+dome)
                     if len(imgs)>2:
