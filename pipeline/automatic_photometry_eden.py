@@ -332,12 +332,18 @@ for i in range(len(dates_raw)):
         if GF_ASTROMETRY:
             optional_options = optional_options+' --gf_opt_astrometry'
             
-        os.system('python get_photometry_eden.py -project '+project+' -datafolder '+dates_raw[i]+optional_options) 
+        os.system('python get_photometry_eden.py -project '+project+' -datafolder '+dates_raw[i]+optional_options)
+        
+        continue # Post-processing algorithm below needs some work
+        
+########################################################################
+        
         # Now, assuming it is done, run the post-processing. First, switch to the post-processing folder:
         cwd = os.getcwd()
         os.chdir('../post_processing')
         out_folder = data_folder+'red/'+dates_raw[i]+'/'
         target_folders = sorted(glob.glob(out_folder+'*'))
+
         # First, go through every observed object for the given night:
         for target_folder in target_folders:
           # Post-process the target only if it has already not been done:
@@ -423,7 +429,6 @@ for i in range(len(dates_raw)):
                            out_folder = out[ii]
                            camera = 'SBIG'
                            break
-                print(out_folder)
                 shutil.move(out_folder,out_folder.rstrip('/')+'_'+ap+'/')
                 if SEND_EMAIL:
                     if(p.returncode != 0 and p.returncode != None):
