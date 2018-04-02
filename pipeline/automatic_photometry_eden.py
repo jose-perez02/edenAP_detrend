@@ -263,27 +263,27 @@ def NumToStr(number,roundto=None):
 
 # Get user input:
 parserIO = argparse.ArgumentParser()
-parserIO.add_argument('-project',default=None)
+parserIO.add_argument('-telescope',default=None)
 parserIO.add_argument('-ndays',default=7)
 args = parserIO.parse_args()
 
-# Get the project name (see the userdata.dat file):
-project = args.project
+# Get the telescope name (see the userdata.dat file):
+telescope = args.telescope
 ndays = int(args.ndays)
 
-# Check for which project the user whishes to download data from:
-fprojects = open('../userdata.dat','r')
+# Check for which telescope the user whishes to download data from:
+ftelescopes = open('../userdata.dat','r')
 while True:
-    line = fprojects.readline()
+    line = ftelescopes.readline()
     if line != '':
         if line[0] != '#':
             cp,cf = line.split()
             cp = cp.split()[0]
             cf = cf.split()[0]
-            if project.lower() == cp.lower():
+            if telescope.lower() == cp.lower():
                 break
     else:
-        print( '\t > Project '+project+' is not on the list of saved projects. ' )
+        print( '\t > Telescope '+telescope+' is not on the list of saved telescopes. ' )
         print( '\t   Please associate it on the userdata.dat file.' )
 
 data_folder = cf
@@ -332,9 +332,9 @@ for i in range(len(dates_raw)):
         if GF_ASTROMETRY:
             optional_options = optional_options+' --gf_opt_astrometry'
             
-        os.system('python get_photometry_eden.py -project '+project+' -datafolder '+dates_raw[i]+optional_options)
+        os.system('python get_photometry_eden.py -telescope '+telescope+' -datafolder '+dates_raw[i]+optional_options)
         
-        continue # Post-processing algorithm below needs some work
+#         continue # Post-processing algorithm below needs some work
         
 ########################################################################
         
@@ -353,9 +353,8 @@ for i in range(len(dates_raw)):
             print( 'Post-processing target '+target+' in folder '+target_folder )
             # Try to get coordinates from Simbad or manual_coordinates.dat
             splitted_name = target.split('-')
-            dome = splitted_name[-1]
-            band = splitted_name[-2]
-            target_name = '-'.join(splitted_name[:-2])
+            band = splitted_name[-1]
+            target_name = '-'.join(splitted_name[:-1])
             RA, DEC = PhotUtils.get_general_coords(target_name,dates_raw[i])
             if RA == 'NoneFound':
                 targetok = False
@@ -364,7 +363,7 @@ for i in range(len(dates_raw)):
             # If we can't determine RA and DEC, we can't run the post-processing algorithm
             if not targetok:
                  if SEND_EMAIL:
-                    mymail = Bimail('LCOGT DR (project: '+project+'): '+target_name+' on ' +datetime.now().strftime('%Y/%m/%d'), emails_to_send)
+                    mymail = Bimail('LCOGT DR (telescope: '+telescope+'): '+target_name+' on ' +datetime.now().strftime('%Y/%m/%d'), emails_to_send)
                     mymail.htmladd('Post-processing failed for object '+target+' on '+dates_raw[i])
                     mymail.send()
                     continue
@@ -375,13 +374,13 @@ for i in range(len(dates_raw)):
                 p.wait()
                 out, err = p.communicate()
                 if ap == 'opt':
-                    code = 'python transit_photometry.py -project '+project+' -datafolder '+\
+                    code = 'python transit_photometry.py -telescope '+telescope+' -datafolder '+\
                            dates_raw[i]+' -target_name '+target_name+' -band "'+band+\
-                           '" -dome '+dome+' -ra "'+RA+'" -dec "'+DEC+'" -ncomp 10 --plt_images --autosaveLC'
+                           '" -ra "'+RA+'" -dec "'+DEC+'" -ncomp 10 --plt_images --autosaveLC'
                 else:
-                    code = 'python transit_photometry.py -project '+project+' -datafolder '+\
+                    code = 'python transit_photometry.py -telescope '+telescope+' -datafolder '+\
                            dates_raw[i]+' -target_name '+target_name+' -band "'+band+\
-                           '" -dome '+dome+' -ra "'+RA+'" -dec "'+DEC+'" -ncomp 10 --plt_images --force_aperture -forced_aperture '+ap+' --autosaveLC'
+                           '" -ra "'+RA+'" -dec "'+DEC+'" -ncomp 10 --plt_images --force_aperture -forced_aperture '+ap+' --autosaveLC'
                 print( code )
                 p = subprocess.Popen(code,stdout = subprocess.PIPE, \
                                      stderr = subprocess.PIPE,shell = True)
@@ -403,7 +402,7 @@ for i in range(len(dates_raw)):
                         out, err = p.communicate()
                         print( spaced(err,"\t \t") )
                     print( 'Sending e-mail...' )
-                    mymail = Bimail('LCOGT DR (project: '+project+'): '+target_name+' on ' +dates_raw[i]+' Aperture: '+ap, emails_to_send)
+                    mymail = Bimail('EDEN DR (telescope: '+telescope+'): '+target_name+' on ' +dates_raw[i]+' Aperture: '+ap, emails_to_send)
                     mymail.htmladd('Data reduction was a SUCCESS! Attached is the lightcurve data.')
                     out_folder = out_folder+'_'+ap
                     real_camera = 'sinistro' # from now on, all LCOGT data comes from sinistro cameras

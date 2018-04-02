@@ -318,7 +318,7 @@ def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, h, x_max, y
     return master_dict,all_names
 
 from astropy.io import fits
-def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_filter,\
+def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filter,\
                   get_astrometry=True,sitelong=None,sitelat=None,sitealt=None,refine_cen=False,\
                   master_dict=None, gf_opt = False):
 
@@ -333,7 +333,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
     else:
         updating_dict = True
 
-    if observatory == 'SWOPE':
+    if telescope == 'SWOPE':
         filter_h_name = 'FILTER'
         long_h_name = 'SITELONG'
         lat_h_name = 'SITELAT'
@@ -346,7 +346,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
         egain = 2.3
         times_method = 1
 
-    elif observatory == 'CHAT':
+    elif telescope == 'CHAT':
         filter_h_name = 'FILTERS'
         long_h_name = 'SITELONG'
         lat_h_name = 'SITELAT'
@@ -359,7 +359,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
         egain = 1.0
         times_method = 3
 
-    elif observatory == 'LCOGT':
+    elif telescope == 'LCOGT':
         # This data is good for LCOGT 1m.
         filter_h_name = 'FILTER'
         long_h_name = 'LONGITUD'
@@ -373,7 +373,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
         egain = 'GAIN'
         times_method = 2
 
-    elif observatory == 'SMARTS':
+    elif telescope == 'SMARTS':
         filter_h_name = 'CCDFLTID'
         long_h_name = 'LONGITUD'
         lat_h_name = 'LATITUDE'
@@ -386,7 +386,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
         egain = 3.2
         times_method = 2
 
-    elif observatory == 'OBSUC':
+    elif telescope == 'OBSUC':
         filter_h_name = 'FILTER'
         long_h_name = None
         sitelong = 289.4656
@@ -402,7 +402,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
         egain = 'EGAIN'
         times_method = 2
 
-    elif observatory == 'NTT':
+    elif telescope == 'NTT':
         filter_h_name = 'HIERARCH ESO INS FILT1 NAME'
         long_h_name = 'HIERARCH ESO TEL GEOLON'
         lat_h_name = 'HIERARCH ESO TEL GEOLAT'
@@ -415,7 +415,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
         egain = 'HIERARCH ESO DET OUT1 GAIN'
         times_method = 2
 
-    elif observatory == 'VATT':
+    elif telescope == 'VATT':
         filter_h_name = 'FILTER'
         long_h_name = None
         lat_h_name = None
@@ -432,7 +432,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
         times_method = 3
 
     else:
-        print( 'ERROR: the selected observatory '+observatory+' is not supported.' )
+        print( 'ERROR: the selected telescope '+telescope+' is not supported.' )
         sys.exit()
 
     # Iterate through the files:
@@ -1075,7 +1075,7 @@ class Time(time.Time):
         self.height = kwargs.get('height',0.0)
 
     def _pvobs(self):
-        '''calculates position and velocity of the observatory
+        '''calculates position and velocity of the telescope
            returns position/velocity in AU and AU/d in GCRS reference frame
         '''
 
@@ -1224,7 +1224,7 @@ class Time(time.Time):
 
     def hcor(self,coord):
         mod, spos = self._vect(coord)
-        # get helio/bary-centric position and velocity of observatory, in AU, AU/d
+        # get helio/bary-centric position and velocity of telescope, in AU, AU/d
         h_pos,h_vel,b_pos,b_vel = self._obs_pos()
 
         # heliocentric light travel time, s
@@ -1235,7 +1235,7 @@ class Time(time.Time):
 
     def bcor(self,coord):
         mod, spos = self._vect(coord)
-        # get helio/bary-centric position and velocity of observatory, in AU, AU/d
+        # get helio/bary-centric position and velocity of telescope, in AU, AU/d
         h_pos,h_vel,b_pos,b_vel  = self._obs_pos()
 
         # barycentric light travel time, s

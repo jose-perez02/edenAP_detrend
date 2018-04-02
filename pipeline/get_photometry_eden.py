@@ -27,7 +27,7 @@ from astropy.io import fits
 
 # Get user input:
 parser = argparse.ArgumentParser()
-parser.add_argument('-project',default=None)
+parser.add_argument('-telescope',default=None)
 parser.add_argument('-datafolder',default=None)
 parser.add_argument('-minap',default = 5)
 parser.add_argument('-maxap',default = 50)
@@ -51,25 +51,25 @@ parser.set_defaults(ref_centers=True)
 
 args = parser.parse_args()
 
-# Get the project name (see the userdata.dat file):
-project = args.project
-observatory = project
+# Get the telescope name (see the userdata.dat file):
+telescope = args.telescope
+
 # Get datafolder/date of the observations that the user wants to reduce:
 datafolder = args.datafolder
 
-# Check for which project the user wishes to download data from:
-fprojects = open('../userdata.dat','r')
+# Check for which telescope the user wishes to download data from:
+ftelescopes = open('../userdata.dat','r')
 while True:
-    line = fprojects.readline()
+    line = ftelescopes.readline()
     if line != '':
         if line[0] != '#':
             cp,cf = line.split()
             cp = cp.split()[0]
             cf = cf.split()[0]
-            if project.lower() == cp.lower():
+            if telescope.lower() == cp.lower():
                 break
     else:
-        print( '\t > Project '+project+' is not on the list of saved projects. ' )
+        print( '\t > Telescope '+telescope+' is not on the list of saved telescopes. ' )
         print( '\t   Please associate it on the userdata.dat file.' )
 
 out_raw_folder = cf + 'raw/'
@@ -118,13 +118,12 @@ for i in range(len(files)):
         print( 'File ',f,' is corrupted. Skipping it' )
         raise
     else:
-        if project == 'VATT':
-            observatory = 'VATT'
+        if telescope == 'VATT':
             target = 'SDSS_J120032.85+204852.7'
-            obj_name = '{:}-{:}-{:}'.format(target, h0['FILTER'], 'VATT')
+            obj_name = '{:}-{:}'.format(target, h0['FILTER'])
         else:
             obj_name = '{:}-{:}'.format(h0['OBJECT'], h0['FILTER'])
-#         if 'Observatory' in h['SITE'].split()[-1]:
+#         if 'telescope' in h['SITE'].split()[-1]:
 #             obj_name = h['OBJECT']+'-'+h['FILTER']+'-'+h['SITE'].split()[-2]+h['SITE'].split()[-1]+h['ENCID']
 #         else:
 #             obj_name = h['OBJECT']+'-'+h['FILTER']+'-'+h['SITE'].split()[-1]+h['ENCID']
@@ -180,7 +179,7 @@ for i in range(len(all_objects)):
         master_dict = pickle.load(open(out_data_folder+'photometry.pkl','rb'))
 
     # Get master dictionary for photometry:
-    master_dict = PhotUtils.getPhotometry(all_files,observatory,R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-2],\
+    master_dict = PhotUtils.getPhotometry(all_files,telescope,R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-1],\
                                           get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
                                           gf_opt = gf_opt_astrometry)
 
