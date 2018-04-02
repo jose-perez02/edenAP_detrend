@@ -578,12 +578,11 @@ for site in sites:
     save_photometry_hs(data,idx,idx_comparison,chosen_aperture,min_ap,max_ap,idx_sort_times,post_dir,target_name,band = band,all_idx = idx_frames)
 
     print ('\t Done!\n')
-    os.mkdir(post_dir+date+'/')
-    os.mkdir(post_dir+date+'/'+target_name+'/')
-    os.mkdir(post_dir+date+'/'+target_name+'/'+band)
-    os.mkdir(post_dir+date+'/'+target_name+'/'+band+'/LC/')
+    
+    # Not sure why these files are copied...
+    os.makedirs(post_dir+date+'/'+target_name+'/'+band+'/LC/', exist_ok=True)
     src_files = os.listdir(post_dir+'/LC/')
     for file_name in src_files:
-        shutil.copy2(os.path.join(foldername+cam+'/LC/',file_name),foldername+cam+'/'+date+'/'+target_name+'/'+band+'/LC/')
+        shutil.copy2(os.path.join(post_dir+'LC/',file_name),post_dir+'/'+date+'/'+target_name+'/'+band+'/LC/')
     print ('\t Done!\n')
     plt.clf()
