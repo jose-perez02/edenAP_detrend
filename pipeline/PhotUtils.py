@@ -480,7 +480,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
                 # First, run astrometry on the current frame if not ran already:
                 filename = f.split('.fits')[0]
                 if not os.path.exists(filename+'.wcs.fits') and get_astrometry:
-                    print ('\t Running astrometry on frame '+f+'...')
+                    print ('\t Calculating astrometry...')
                     run_astrometry(f, ra=ra_obj[0], dec=dec_obj[0], radius=0.5,\
                                    scale_low=t_scale_low, scale_high=t_scale_high, \
                                    apply_gaussian_filter=gf_opt)
@@ -506,8 +506,8 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
                         else:
                             date = ''.join(h0['DATE-OBS'].split('-'))
                         central_ra, central_dec = CoordsToDecimal([[h0['RA'], h0['DEC']]])
-                        print (central_ra, central_dec)
-                        print (ra_obj, dec_obj)
+#                         print (central_ra, central_dec)
+#                         print (ra_obj, dec_obj)
                         if not updating_dict:
                             master_dict,all_names = get_dict(central_ra[0],central_dec[0],search_radius,ra_obj,dec_obj,\
                                                              h,data.shape[1],data.shape[0], R,date=date)
@@ -603,7 +603,7 @@ def getPhotometry(filenames,observatory,R,ra_obj,dec_obj,out_data_folder,use_fil
                     #print 'Centroids, before:',x[71],y[71]
                     #print 'Centroids, after :',x_ref[71],y_ref[71]
                     toc = clocking_time.time()
-                    print ('\t Took '+str(toc-tic)+' seconds.')
+                    print ('\t Took {:1.2f} seconds.'.format(toc-tic))
                     # Save everything in the dictionary:
                     for i in range(len(all_names)):
                         master_dict['data'][all_names[i]]['centroids_x'] = np.append(master_dict['data'][all_names[i]]['centroids_x'],x_ref[i])
