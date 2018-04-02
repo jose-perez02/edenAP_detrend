@@ -558,8 +558,7 @@ for site in sites:
                 mfilt = medfilt(relative_flux[idx_sort_times],median_window)
                 precision[i] = get_sigma((relative_flux[idx_sort_times] - mfilt)*1e6)
 
-#         idx_max_prec = np.where(precision==np.min(precision))[0][0] # <- Need to fix this
-        idx_max_prec = 0
+        idx_max_prec = np.argmin(precision)
         chosen_aperture = apertures_to_check[idx_max_prec]
         print ('\t >> Best precision achieved at an aperture of ',chosen_aperture,'pixels')
         print ('\t >> Precision achieved: ',precision[idx_max_prec],'ppm')
