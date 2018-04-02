@@ -152,20 +152,18 @@ def save_photometry(t,rf,rf_err,output_folder,target_name, plot_data = False, ti
         t_hours = (t - t_mean) * 24.
         n_bin = 10
         times_bins = []
-        mags_bins = []
+        fluxes_bins = []
         errors_bins = []
         for i in range(0,len(t),n_bin):
             times_bins.append(np.median(t_hours[i:i+n_bin-1]))
-            mags_bins.append(np.median(rf_mag[i:i+n_bin-1]))
-            errors_bins.append(np.sqrt(np.sum(rf_mag_err[i:i+n_bin-1]**2))/np.double(n_bin))
+            fluxes_bins.append(np.median(rf[i:i+n_bin-1]))
+            errors_bins.append(np.sqrt(np.sum(rf_err[i:i+n_bin-1]**2))/np.double(n_bin))
         
-        plt.errorbar(t_hours,rf_mag,rf_mag_err,fmt='o',alpha=0.3,label='Data')
-        plt.errorbar(np.array(times_bins),np.array(mags_bins),np.array(errors_bins),fmt='o',label='Binned data')
+        plt.errorbar(t_hours,rf,rf_err,fmt='o',alpha=0.3,label='Data')
+        plt.errorbar(np.array(times_bins),np.array(fluxes_bins),np.array(errors_bins),fmt='o',label='Binned data')
         plt.xlabel('Hours from {:0.4f} (BJD)'.format(t_mean))
-        plt.ylabel('Differential Magnitude')
+        plt.ylabel('Relative flux')
         plt.title(title,fontsize='12')
-        plt.gca().invert_yaxis()
-#         plt.xlim(np.min(t-2450000)-np.abs(np.median(np.diff(t))),np.max(t-2450000)+np.abs(np.median(np.diff(t))))
         plt.xlim(-0.55*np.ptp(t_hours), 0.55*np.ptp(t_hours))
 #         plt.ylim(0.03,-0.015)
         x_formatter = ticker.ScalarFormatter(useOffset=False)
