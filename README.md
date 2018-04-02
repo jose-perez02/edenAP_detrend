@@ -3,7 +3,7 @@
 This repository stores codes to perform aperture photometry on datasets from 
 the EDEN survey. 
 
-It has been directly adapted from lcogtAP, created by Néstor Espinoza (nsespino@uc.cl)
+It has been adapted directly from lcogtAP, created by Néstor Espinoza (nsespino@uc.cl)
 
 DEPENDENCIES
 ------------
@@ -77,12 +77,12 @@ on having internet connection:
 
  1. First, edit the userdata.dat file and fill in a project name and a folder 
     where the data is for that project. It is assumed inside the project 
-    folder there is another folder named `LCOGT/raw`, which contains the data 
+    folder there is another folder named `raw`, which contains the data 
     for different dates. For example, if the project folder for the 
-    project `kpBRIGHTSTARS` is `/data/keyproject/bright_stars/`, it is assumed 
-    the folder `/data/keyproject/bright_stars/LCOGT/raw` exists, and contains 
+    project `VATT` is `/data/VATT/`, it is assumed 
+    the folder `/data/VATT/raw` exists, and contains 
     the data for different dates in separate folders (e.g., 
-    `/data/keyproject/bright_stars/LCOGT/raw/20170213` ).
+    `/data/VATT/raw/20180128` ).
 
 2. From terminal, go to the pipeline folder (`cd pipeline`) and run:
 
@@ -91,11 +91,11 @@ on having internet connection:
    Where `NAMEOFTHEPROJECT` corresponds to the project in the userdata.dat file 
    that you filled in in step 1. This will run the pipeline and save the products 
    under a `red` folder, inside the project's folder (e.g., if the project was 
-   `kpBRIGHTSTARS`, products will be saved in `/data/keyproject/bright_stars/LCOGT/red`). 
+   `VATT`, products will be saved in `/data/VATT/red`). 
    The pipeline will generate photometry for all the datasets in the folder for which no 
    photometry is yet available that have dates (which is measured from the folder name, 
-   i.e., if the dataset is in `/data/keyproject/bright_stars/LCOGT/red/20170320` it assumes 
-   the dataset is from 2017/03/20) whithin `N` days from today (measured from your 
+   i.e., if the dataset is in `/data/VATT/red/20180128` it assumes 
+   the dataset is from 2018/01/28) whithin `N` days from today (measured from your 
    computer's date; if the `-ndays` input is not given, it is assumed `N` is `7`, i.e., 
    check data only one week appart from today).
 
@@ -105,7 +105,7 @@ move to the "Products" section.
 WHAT DOES THE PIPELINE DO?
 ---------------------------
 
-In the background, what the pipeline does is to use the `pipeline/get_photometry_lcogt.py` 
+In the background, what the pipeline does is to use the `pipeline/get_photometry_eden.py` 
 code to get the photometry for all the stars in the field for all the images. It first 
 identifies the objects in the image by doing a query to 2MASS (previous to running an 
 astrometric solution with astrometry, if the images don't have it). This photometry is 
@@ -118,7 +118,7 @@ the images and queries the Kepler webpage, Simbad, or the `manual_object_coords.
 this folder (in that order). If the target name is not identified in any of these cases, then 
 no differential photometry is performed and you have to perform it on your own. Aperture photometry 
 is performed for 5 apertures: opt, 5, 15, 20 and 30 pixels. The `opt` aperture is an optimal aperture 
-calculated on the rms of the lightcurve; the `get_photometry_lcogt.py` code does apertures from 5 
+calculated on the rms of the lightcurve; the `get_photometry_eden.py` code does apertures from 5 
 pixels to 50 pixels, and the `post_processing/transit_photometry.py` code searches for the aperture 
 with the smallest RMS.
 
@@ -132,7 +132,7 @@ resulting lightcurve with other methods.
 PRODUCTS
 --------
 
-The products of the `automatic_lcogt.py` code are stored in the `red` folder for each date and for 
+The products of the `automatic_eden.py` code are stored in the `red` folder for each date and for 
 each target. Inside, you will find:
 
  1. The `photometry.pkl` file, which contains all the aperture photometry for all the stars in the field 
@@ -164,7 +164,7 @@ POST-PROCESSING USAGE
 In the eventuality in which the post-processing fails, you can do it yourself inside the `post_processing` folder. 
 A common usage is:
 
-           python transit_photometry.py -project NAMEOFTHEPROJECT -datafolder 20160520 -target_name TARGETNAME -ra "14:00:00" -dec " -60:00:00" --plt_images
+           python transit_photometry.py -project NAMEOFTHEPROJECT -datafolder 20180128 -target_name TARGETNAME -ra "14:00:00" -dec " -60:00:00" --plt_images
 
-This will save the photometry in the `red/20160520` folder inside the project `NAMEOFTHEPROJECT` for the target 
+This will save the photometry in the `red/20180128` folder inside the project `NAMEOFTHEPROJECT` for the target 
 `TARGETNAME`.
