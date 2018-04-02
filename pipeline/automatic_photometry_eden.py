@@ -346,90 +346,57 @@ for i in range(len(dates_raw)):
 
         # First, go through every observed object for the given night:
         for target_folder in target_folders:
-          # Post-process the target only if it has already not been done:
-          if target_folder not in before_target_folders:
+            # Post-process the target only if it has already not been done:
+            if target_folder in before_target_folders:
+                continue
             target = target_folder.split('/')[-1]
-            print( 'Post-processing target '+target+' on folder '+target_folder )
-            # If it is a HATS target, query to canditrack, get RA and DEC, and run the 
-            # post-processing algorithm. If not, assume it is a K2 object whose EPIC
-            # number is in 'target' (e.g., target = '214323253242-ip'). In that case, 
-            # query RA and DEC from MAST:
-            if target[0:4] == 'HATS':
-                if 'Inter-American' in target:
-                    name,number,band,n1,n2 = target.split('-')
-                    dome = n1+'-'+n2
-                else:
-                    name,number,band,dome = target.split('-')
-                target_name = '-'.join([name,number])
-                if first_HS_login:
-                    s = get_login_data()
-                    first_HS_login = False
-                try:
-                    RA,DEC = get_hs_coords(s,target_name)
-                    print( '\t Found RA and DEC:',RA,DEC )
-                    targetok = True
-                except:
-                    RA,DEC = PhotUtils.get_general_coords(target_name,dates_raw[i])
-                    if RA == 'NoneFound':
-                        targetok = False
-                        print( '\t RA and DEC obtention failed!' )
-                    else:
-                        targetok = True
+            print( 'Post-processing target '+target+' in folder '+target_folder )
+            # Try to get coordinates from Simbad or manual_coordinates.dat
+            splitted_name = target.split('-')
+            dome = splitted_name[-1]
+            band = splitted_name[-2]
+            target_name = '-'.join(splitted_name[:-2])
+            RA, DEC = PhotUtils.get_general_coords(target_name,dates_raw[i])
+            if RA == 'NoneFound':
+                targetok = False
             else:
-                if 'Inter-American' in target:
-                    splitted_name = target.split('-')
-                    n2 = splitted_name[-1]
-                    n1 = splitted_name[-2]
-                    band = splitted_name[-3]
-                    target_name = '-'.join(splitted_name[:-3])
-                    dome = n1+'-'+n2
-                else:
-                    splitted_name = target.split('-')
-                    dome = splitted_name[-1]
-                    band = splitted_name[-2]
-                    target_name = '-'.join(splitted_name[:-2])
-                try:
-                    RA,DEC = get_epic_coords(target_name)
-                    RA = ':'.join(RA.split())
-                    DEC = ':'.join(DEC.split())
-                    print( '\t Found RA and DEC:',RA,DEC )
-                    targetok = True
-                except:
-                    RA,DEC = PhotUtils.get_general_coords(target_name,dates_raw[i])
-                    if RA == 'NoneFound':
-                        targetok = False
-                    else:
-                        targetok = True
+                targetok = True
+            # If we can't determine RA and DEC, we can't run the post-processing algorithm
+            if not targetok:
+                 if SEND_EMAIL:
+                    mymail = Bimail('LCOGT DR (project: '+project+'): '+target_name+' on ' +datetime.now().strftime('%Y/%m/%d'), emails_to_send)
+                    mymail.htmladd('Post-processing failed for object '+target+' on '+dates_raw[i])
+                    mymail.send()
+                    continue
             # Assuming RA an DEC have been retrieved, run the post-processing algorithm:
-            if targetok:
-              for ap in ['opt','5','15','20','30']:
+            for ap in ['opt','5','15','20','30']:
                 p = subprocess.Popen('echo $DISPLAY',stdout = subprocess.PIPE, \
-                           stderr = subprocess.PIPE,shell = True)
+                                     stderr = subprocess.PIPE,shell = True)
                 p.wait()
                 out, err = p.communicate()
                 if ap == 'opt':
                     code = 'python transit_photometry.py -project '+project+' -datafolder '+\
-                           dates_raw[i]+' -target_name '+target_name+' -band '+band+\
-                           ' -dome '+dome+' -ra "'+RA+'" -dec " '+DEC+'" -ncomp 10 --plt_images --autosaveLC'
+                           dates_raw[i]+' -target_name '+target_name+' -band "'+band+\
+                           '" -dome '+dome+' -ra "'+RA+'" -dec "'+DEC+'" -ncomp 10 --plt_images --autosaveLC'
                 else:
                     code = 'python transit_photometry.py -project '+project+' -datafolder '+\
-                           dates_raw[i]+' -target_name '+target_name+' -band '+band+\
-                           ' -dome '+dome+' -ra "'+RA+'" -dec " '+DEC+'" -ncomp 10 --plt_images --force_aperture -forced_aperture '+ap+' --autosaveLC'
+                           dates_raw[i]+' -target_name '+target_name+' -band "'+band+\
+                           '" -dome '+dome+' -ra "'+RA+'" -dec "'+DEC+'" -ncomp 10 --plt_images --force_aperture -forced_aperture '+ap+' --autosaveLC'
                 print( code )
                 p = subprocess.Popen(code,stdout = subprocess.PIPE, \
-                           stderr = subprocess.PIPE,shell = True)
+                                     stderr = subprocess.PIPE,shell = True)
                 p.wait()
                 out = sorted(glob.glob(data_folder+'red/'+dates_raw[i]+'/'+target+'/*'))
-                for ii in range(len(out)):
-                       if out[ii].split('/')[-1] == 'sinistro':
-                           out_folder = out[ii]
-                           camera = 'sinistro'
-                           break
-                       elif out[ii].split('/')[-1] == 'sbig':
-                           out_folder = out[ii]
-                           camera = 'SBIG'
-                           break
-                shutil.move(out_folder,out_folder.rstrip('/')+'_'+ap+'/')
+#                 for ii in range(len(out)):
+#                     if out[ii].split('/')[-1] == 'sinistro':
+#                         out_folder = out[ii]
+#                         camera = 'sinistro'
+#                         break
+#                     elif out[ii].split('/')[-1] == 'sbig':
+#                         out_folder = out[ii]
+#                         camera = 'SBIG'
+#                         break
+#                 shutil.move(out_folder,out_folder.rstrip('/')+'_'+ap+'/')
                 if SEND_EMAIL:
                     if(p.returncode != 0 and p.returncode != None):
                         print( 'Error sending mail:' )
@@ -441,10 +408,10 @@ for i in range(len(dates_raw)):
                     out_folder = out_folder+'_'+ap
                     real_camera = 'sinistro' # from now on, all LCOGT data comes from sinistro cameras
                     imgs = sorted(glob.glob(out_folder+'/target/*'))
-#                     f = data_folder+'raw/'+dates_raw[i]+'/'+(imgs[0].split('/')[-1]).split('.')[0]+'.fits'
-#                     d,h = pyfits.getdata(f, header=True)
+  #                     f = data_folder+'raw/'+dates_raw[i]+'/'+(imgs[0].split('/')[-1]).split('.')[0]+'.fits'
+  #                     d,h = pyfits.getdata(f, header=True)
                     mymail.htmladd('Camera: '+camera)
-#                     mymail.htmladd('Observing site: '+h['SITE'])
+  #                     mymail.htmladd('Observing site: '+h['SITE'])
                     mymail.htmladd('Band: '+band)
                     mymail.htmladd('Dome: '+dome)
                     if len(imgs)>2:
@@ -460,11 +427,7 @@ for i in range(len(dates_raw)):
                     mymail.addattach([out_folder+'/'+target_name+'.pdf'])
                     mymail.addattach([out_folder+'/LC/'+target_name+'.epdlc'])
                     mymail.send()
-              shutil.move(out_folder[:-3]+'_opt',data_folder+'red/'+dates_raw[i]+'/'+target+'/sinistro')
-            else:
-                if SEND_EMAIL:
-                    mymail = Bimail('LCOGT DR (project: '+project+'): '+target_name+' on ' +datetime.now().strftime('%Y/%m/%d'), emails_to_send)
-                    mymail.htmladd('Post-processing failed for object '+target+' on '+dates_raw[i])
-                    mymail.send()
+#                 shutil.move(out_folder[:-3]+'_opt',data_folder+'red/'+dates_raw[i]+'/'+target+'/sinistro')
+
         # Get back to photometric pipeline directory:
         os.chdir(cwd) 
