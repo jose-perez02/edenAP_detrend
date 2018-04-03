@@ -220,7 +220,7 @@ def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, h, x_max, y
     decppm = np.array(resultppm['pmde'].data.data.tolist())
 
     # Save coordinates, magnitudes and errors on the magnitudes:
-    all_ids = np.array(result['designation'].data.data.tolist())
+    all_ids = np.array(result['designation'].data.data.tolist()).astype(str)
     all_ra = np.array(result['ra'].data.data.tolist())
     all_dec = np.array(result['dec'].data.data.tolist())
     all_j = np.array(result['j_m'].data.data.tolist())
