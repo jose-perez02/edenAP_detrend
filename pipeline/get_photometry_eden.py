@@ -118,16 +118,9 @@ for i in range(len(files)):
         print( 'File ',f,' is corrupted. Skipping it' )
         raise
     else:
-        if telescope == 'VATT':
-            target = 'SDSS_J120032.85+204852.7'
-            obj_name = '{:}-{:}'.format(target, h0['FILTER'])
-        else:
-            obj_name = '{:}-{:}'.format(h0['OBJECT'], h0['FILTER'])
-#         if 'telescope' in h['SITE'].split()[-1]:
-#             obj_name = h['OBJECT']+'-'+h['FILTER']+'-'+h['SITE'].split()[-2]+h['SITE'].split()[-1]+h['ENCID']
-#         else:
-#             obj_name = h['OBJECT']+'-'+h['FILTER']+'-'+h['SITE'].split()[-1]+h['ENCID']
-#         print( obj_name )
+        target = h0['OBJECT']
+        filter = h0['FILTER']
+        obj_name = '{:}-{:}'.format(target.replace(' ', '_'), filter)
         object_in_files[i] = obj_name
         if ('bias' in obj_name) or ('flat' in obj_name) or ('dark' in obj_name):
             continue
@@ -179,7 +172,7 @@ for i in range(len(all_objects)):
         master_dict = pickle.load(open(out_data_folder+'photometry.pkl','rb'))
 
     # Get master dictionary for photometry:
-    master_dict = PhotUtils.getPhotometry(all_files,telescope,R,ra_obj,dec_obj,out_data_folder,obj_name.split('-')[-1],\
+    master_dict = PhotUtils.getPhotometry(all_files,telescope,R,ra_obj,dec_obj,out_data_folder,filter,\
                                           get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
                                           gf_opt = gf_opt_astrometry)
 

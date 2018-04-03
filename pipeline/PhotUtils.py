@@ -1270,53 +1270,19 @@ def get_exts(filename):
         exts = [0]
     return exts
 
+from astroquery.simbad import Simbad
+Simbad.add_votable_fields('propermotions')
 def get_general_coords(target,date):
     """
     Given a target name, returns RA and DEC from simbad.
     """
+    date = date.replace('-', '')
     try:
-        url = "http://simbad.u-strasbg.fr/simbad/sim-id?Ident="+target+"&NbIdent=1&Radius=2&Radius.unit=arcmin&submit=submit+id"
-        html = urllib.urlopen(url).read()
-        splt = html.split('ICRS')
-        spltpp = html.split('Proper motions')
-        rahh,ramm,rass,decdd,decmm,decss = (splt[1].split('<TT>\n')[1].split('\n')[0]).split()
-        if len(spltpp)==1:
-            return rahh+':'+ramm+':'+rass,decdd+':'+decmm+':'+decss
-        else:
-            linesplitpp = (spltpp[1].split('<TT>\n')[1].split('\n')[0]).split()
-            pmra,pmdec = linesplitpp[0],linesplitpp[1]
-            # Convert RA and DEC to whole numbers:
-            ra = np.double(rahh)+(np.double(ramm)/60.)+(np.double(rass)/3600.)
-            if np.double(decdd)<0:
-                dec = np.double(decdd)-(np.double(decmm)/60.)-(np.double(decss)/3600.)
-            else:
-                dec = np.double(decdd)+(np.double(decmm)/60.)+(np.double(decss)/3600.)
-            # Calculate time difference from J2000:
-            year = int(date[:4])
-            month = int(date[4:6])
-            day = int(date[6:8])
-            s = str(year)+'.'+str(month)+'.'+str(day)
-            dt = parser.parse(s)
-            data_jd = sum(jdcal.gcal2jd(dt.year, dt.month, dt.day))
-            deltat = (data_jd-2451544.5)/365.25
-            # Calculate total PM:
-            print( dec )
-            pmra = np.double(pmra)*deltat/15. # Conversion from arcsec to sec
-            pmdec = np.double(pmdec)*deltat
-            # Correct proper motion:
-            c_ra = ra + ((pmra*1e-3)/3600.)
-            c_dec = dec + ((pmdec*1e-3)/3600.)
-            # Return RA and DEC:
-            ra_hr = int(c_ra)
-            ra_min = int((c_ra - ra_hr)*60.)
-            ra_sec = (c_ra - ra_hr - ra_min/60.0)*3600.
-            dec_deg = int(c_dec)
-            dec_min = int(np.abs(c_dec-dec_deg)*60.)
-            dec_sec = (np.abs(c_dec-dec_deg)-dec_min/60.)*3600.
-            return NumToStr(ra_hr)+':'+NumToStr(ra_min)+':'+NumToStr(ra_sec,roundto=3),\
-                   NumToStr(dec_deg)+':'+NumToStr(dec_min)+':'+NumToStr(dec_sec,roundto=3)
+        # Try to get info from Simbad
+        result = Simbad.query_object(target)
     except:
-        coords_file = open('../manual_object_coords.dat','r')
+        # Manually load values
+         coords_file = open('../manual_object_coords.dat','r')
         while True:
             line = coords_file.readline()
             if line != '':
@@ -1327,5 +1293,43 @@ def get_general_coords(target,date):
             else:
                 break
         coords_file.close()
+        # As a last resort:
         return 'NoneFound','NoneFound'
+    else:
+        # Assuming the Simbad query worked, load the coordinates:
+        # Load positions as strings
+        rahh, ramm, rass = result['RA'][0].split()
+        decdd, decmm, decss = result['DEC'][0].split()
+        # Load proper motions as arcsec / year
+        pmra = result['PMRA'].to(u.arcsec/u.year).value[0]
+        pmdec = result['PMDEC'].to(u.arcsec/u.year).value[0]
+        # Convert RA and DEC to whole numbers:
+        ra = np.double(rahh)+(np.double(ramm)/60.)+(np.double(rass)/3600.)
+        if np.double(decdd)<0:
+            dec = np.double(decdd)-(np.double(decmm)/60.)-(np.double(decss)/3600.)
+        else:
+            dec = np.double(decdd)+(np.double(decmm)/60.)+(np.double(decss)/3600.) 
+        # Calculate time difference from J2000:
+        year = int(date[:4])
+        month = int(date[4:6])
+        day = int(date[6:8])
+        s = str(year)+'.'+str(month)+'.'+str(day)
+        dt = dateutil.parser.parse(s)
+        data_jd = sum(jdcal.gcal2jd(dt.year, dt.month, dt.day))
+        deltat = (data_jd-2451544.5)/365.25
+        # Calculate total PM:
+        pmra = np.double(pmra)*deltat/15. # Conversion from arcsec to sec
+        pmdec = np.double(pmdec)*deltat
+        # Correct proper motion:
+        c_ra = ra + ((pmra)/3600.)
+        c_dec = dec + ((pmdec)/3600.)
+        # Return RA and DEC:
+        ra_hr = int(c_ra)
+        ra_min = int((c_ra - ra_hr)*60.)
+        ra_sec = (c_ra - ra_hr - ra_min/60.0)*3600.
+        dec_deg = int(c_dec)
+        dec_min = int(np.abs(c_dec-dec_deg)*60.)
+        dec_sec = (np.abs(c_dec-dec_deg)-dec_min/60.)*3600.
+        return NumToStr(ra_hr)+':'+NumToStr(ra_min)+':'+NumToStr(ra_sec,roundto=3),\
+               NumToStr(dec_deg)+':'+NumToStr(dec_min)+':'+NumToStr(dec_sec,roundto=3)
     
