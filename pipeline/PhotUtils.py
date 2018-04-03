@@ -201,7 +201,7 @@ from astroquery.irsa import Irsa
 # Default limit of rows is 500. Go for infinity and beyond!
 Irsa.ROW_LIMIT = np.inf
 import astropy.units as u
-def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, h, x_max, y_max, R,\
+def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, hdulist, exts, R,\
         catalog = u'fp_psc',date='20180101'):
 
     print( '\t > Generating master dictionary for coordinates',central_ra,central_dec,'...' )
@@ -255,13 +255,20 @@ def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, h, x_max, y
             #    print 'New RA DEC:',all_ra[i],all_dec[i]
     print( '\t Done.' )
 
-    # Check which ras and decs have valid coordinates inside the first image. 
+    # Check which ras and decs have valid coordinates inside the first image...
+    # ...considering all image extensions.
     # Save only those as valid objects for photometry:
-    x,y = SkyToPix(h,all_ra,all_dec)
     idx = []
-    for i in range(len(x)):
-        if x[i]>0 and x[i]<x_max and y[i]>0 and y[i]<y_max:
-            idx.append(i)
+    all_extensions = np.array([])
+    for ext in exts:
+        h = hdulist[ext].header
+        x_max = hdulist[ext].data.shape[1]
+        y_max = hdulist[ext].data.shape[0]
+        x,y = SkyToPix(h,all_ra,all_dec)
+        for i in range(len(x)):
+            all_extensions = np.append(all_extensions, ext)
+            if x[i]>0 and x[i]<x_max and y[i]>0 and y[i]<y_max:
+                idx.append(i)
 
     # Create dictionary that will save all the data:
     master_dict = {}
@@ -279,6 +286,7 @@ def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, h, x_max, y
     master_dict['data']['IDs'] = all_ids[idx]
     master_dict['data']['DEC_degs'] = all_dec[idx]
     master_dict['data']['RA_coords'],master_dict['data']['DEC_coords'] = DecimalToCoords(all_ra[idx],all_dec[idx])
+    master_dict['data']['ext'] = all_extensions[idx]
     master_dict['data']['Jmag'] = all_j[idx]
     master_dict['data']['Jmag_err'] = all_j_err[idx]
     master_dict['data']['Kmag'] = all_k[idx]
@@ -510,7 +518,7 @@ def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filte
 #                         print (ra_obj, dec_obj)
                         if not updating_dict:
                             master_dict,all_names = get_dict(central_ra[0],central_dec[0],search_radius,ra_obj,dec_obj,\
-                                                             h,data.shape[1],data.shape[0], R,date=date)
+                                                             hdulist, exts, R,date=date)
                         else:
                             all_data = master_dict['data'].keys()
                             all_names_d = []
