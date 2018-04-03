@@ -494,136 +494,138 @@ def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filte
                                    apply_gaussian_filter=gf_opt)
                     print ('\t ...done!')
 
-                # Now get data if astrometry worked or if no astrometry was needed on the frame:
-                if os.path.exists(filename+'.wcs.fits') or not get_astrometry:
+                # Now get data if astrometry worked...
+                if os.path.exists(filename+'.wcs.fits') and get_astrometry:
                     # If get_astrometry flag is on, prefer the generated file instead of the original:
-                    if get_astrometry:
-                        print( '\t Detected file '+filename+'.wcs.fits'+'. Using it...' )
-                        hdulist = fits.open(filename+'.wcs.fits')
+                    print( '\t Detected file '+filename+'.wcs.fits'+'. Using it...' )
+                    hdulist = fits.open(filename+'.wcs.fits')
+                # ...or if no astrometry was needed on the frame:
+                elif not get_astrometry:
+                    hdulist = fits.open(filename+'.fits')
+
+                # Load the data:
+                h = hdulist[1].header
+                data = hdulist[1].data # <------ This will need to be generalized
+
+                # Create master dictionary and define data to be used in the code:    
+                if first_time:
+                    if times_method == 2:
+                        date = ''.join(h0['DATE-OBS'].split('T')[0].split('-'))
                     else:
-                        hdulist = fits.open(filename+'.fits')
-
-                    # Load the data:
-                    h = hdulist[1].header
-                    data = hdulist[1].data # <------ This will need to be generalized
-
-                    # Create master dictionary and define data to be used in the code:    
-                    if first_time:
-                        if times_method == 2:
-                            date = ''.join(h0['DATE-OBS'].split('T')[0].split('-'))
-                        else:
-                            date = ''.join(h0['DATE-OBS'].split('-'))
-                        central_ra, central_dec = CoordsToDecimal([[h0['RA'], h0['DEC']]])
+                        date = ''.join(h0['DATE-OBS'].split('-'))
+                    central_ra, central_dec = CoordsToDecimal([[h0['RA'], h0['DEC']]])
 #                         print (central_ra, central_dec)
 #                         print (ra_obj, dec_obj)
-                        if not updating_dict:
-                            master_dict,all_names = get_dict(central_ra[0],central_dec[0],search_radius,ra_obj,dec_obj,\
-                                                             hdulist, exts, R,date=date)
-                        else:
-                            all_data = master_dict['data'].keys()
-                            all_names_d = []
-                            all_idx = []
-                            for dataname in all_data:
-                                if 'star' in dataname:
-                                    all_names_d.append(dataname)
-                                    all_idx.append(int(dataname.split('_')[-1]))
-                            idxs = np.argsort(all_idx)
-                            all_names = len(all_names_d)*[[]]
-                            for i in range(len(idxs)):
-                                all_names[i] = all_names_d[idxs[i]]
-
-                        if sitelong is None:
-                            sitelong = h[long_h_name]
-                        if sitelat is None:
-                            sitelat = h[lat_h_name]
-                        if sitealt is None:
-                            sitealt = h[alt_h_name]
-                        if longitude is None:
-                           #print sitelong,sitelat,sitealt
-                           longitude,latitude,elevation = site_data_2_string(sitelong,sitelat,sitealt)
-                        first_time = False
-
-                    # Save filename to master dictionary:
-                    master_dict['frame_name'] = np.append(master_dict['frame_name'],f)
-
-                    ########## OBTAINING THE TIMES OF OBSERVATION ####################
-                    # Get the BJD time. First, add exposure time:
-                    if times_method == 1:
-                        utc_time = h0['DATE-OBS']+'T-'+h0['UT-TIME']
-                    elif times_method == 2:
-                        utc_time = h0['DATE-OBS']
-                    elif times_method == 3:
-                        utc_time = h0['DATE-OBS']+'T-'+h0['TIME-OBS']
-
-                    # Get time at the center of the observations (initial + exptime/2):
-                    t_center = mdates.date2num(dateutil.parser.parse(\
-                                               utc_time)) + (h0[exptime_h_name]/(2.))*(1./(24.*3600.))
-
-                    # Convert back to string:
-                    date = (mdates.num2date(t_center))
-                    string_date = date_format(date.year,date.month,date.day,\
-                                              date.hour,date.minute,date.second)
-
-                    # Prepare object in order to convert this UTC time to BJD time:
-                    t = Time(string_date, format='isot', scale='utc', \
-                             location=(str(sitelong)+'d',str(sitelat)+'d',sitealt))
-
-                    coords = SkyCoord(h0['RA']+' '+h0['DEC'], unit=(u.hourangle, u.deg))
-
-                    # Save UTC, exposure, JD and BJD and LS times. Save also the airmass:
-                    master_dict['UTC_times'] = np.append(master_dict['UTC_times'],utc_time)
-                    master_dict['exptimes'] = np.append(master_dict['exptimes'],h0[exptime_h_name])
-                    master_dict['JD_times'] = np.append(master_dict['JD_times'],t.jd)
-                    master_dict['BJD_times'] = np.append(master_dict['BJD_times'],((t.bcor(coords)).jd))
-                    if lst_h_name is not None:
-                        master_dict['LST'] = np.append(master_dict['LST'],h0[lst_h_name])
+                    if not updating_dict:
+                        master_dict,all_names = get_dict(central_ra[0],central_dec[0],search_radius,ra_obj,dec_obj,\
+                                                         hdulist, exts, R,date=date)
                     else:
-                        t.delta_ut1_utc = 0.
-                        c_lst = str(t.sidereal_time('mean', 'greenwich'))
-                        c_lst = c_lst.split('h')
-                        hh = c_lst[0]
-                        c_lst = c_lst[1].split('m')
-                        mm = c_lst[0]
-                        ss = (c_lst[1])[:-1]
-                        master_dict['LST'] = np.append(master_dict['LST'],hh+':'+mm+':'+ss)
-                    if airmass_h_name is not None:
-                        master_dict['airmasses'] = np.append(master_dict['airmasses'],h0[airmass_h_name])
-                    else:
-                        year,month,day,hh,mm,ss = getCalDay((t.bcor(coords)).jd)
-                        day = getTime(year,month,day,hh,mm,ss)
-                        master_dict['airmasses'] = np.append(master_dict['airmasses'],getAirmass(central_ra[0],central_dec[0],day,longitude,latitude,elevation))
+                        all_data = master_dict['data'].keys()
+                        all_names_d = []
+                        all_idx = []
+                        for dataname in all_data:
+                            if 'star' in dataname:
+                                all_names_d.append(dataname)
+                                all_idx.append(int(dataname.split('_')[-1]))
+                        idxs = np.argsort(all_idx)
+                        all_names = len(all_names_d)*[[]]
+                        for i in range(len(idxs)):
+                            all_names[i] = all_names_d[idxs[i]]
 
-                    ########## OBTAINING THE FLUXES ###################
-                    #master_dict['data']['RA_degs'][223],master_dict['data']['DEC_degs'][223] = 19.4620208,0.3419944
-                    x,y = SkyToPix(h,master_dict['data']['RA_degs'],master_dict['data']['DEC_degs'])
-                    # Get fluxes of all the targets in the image for different apertures:
-                    print ('\t Performing aperture photometry on objects...')
-                    tic = clocking_time.time()
-                    if type(egain) == type('str'):
-                        fluxes,errors,x_ref,y_ref,bkg,bkg_err,fwhm = getAperturePhotometry(data,h,x,y,R,\
-                               all_names, frame_name = filename.split('/')[-1], \
-                               out_dir = out_data_folder, GAIN = h[egain], saveplot = False, refine_centroids = refine_cen)
-                    else:
-                        fluxes,errors,x_ref,y_ref,bkg,bkg_err,fwhm = getAperturePhotometry(data,h,x,y,R,\
-                               all_names, frame_name = filename.split('/')[-1], \
-                               out_dir = out_data_folder, GAIN = egain, saveplot = False, refine_centroids = refine_cen)
-                    #print all_names[71]
-                    #print 'Centroids, before:',x[71],y[71]
-                    #print 'Centroids, after :',x_ref[71],y_ref[71]
-                    toc = clocking_time.time()
-                    print ('\t Took {:1.2f} seconds.'.format(toc-tic))
-                    # Save everything in the dictionary:
-                    for i in range(len(all_names)):
-                        master_dict['data'][all_names[i]]['centroids_x'] = np.append(master_dict['data'][all_names[i]]['centroids_x'],x_ref[i])
-                        master_dict['data'][all_names[i]]['centroids_y'] = np.append(master_dict['data'][all_names[i]]['centroids_y'],y_ref[i])
-                        master_dict['data'][all_names[i]]['background'] = np.append(master_dict['data'][all_names[i]]['background'],bkg[i])
-                        master_dict['data'][all_names[i]]['background_err'] = np.append(master_dict['data'][all_names[i]]['background_err'],bkg_err[i])
-                        master_dict['data'][all_names[i]]['fwhm'] = np.append(master_dict['data'][all_names[i]]['fwhm'],fwhm[i])
-                        for j in range(len(R)):
-                            master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap'] = \
-                                np.append(master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap'],fluxes[i,j])
-                            master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap_err'] = \
-                                np.append(master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap_err'],errors[i,j])
+                    if sitelong is None:
+                        sitelong = h[long_h_name]
+                    if sitelat is None:
+                        sitelat = h[lat_h_name]
+                    if sitealt is None:
+                        sitealt = h[alt_h_name]
+                    if longitude is None:
+                       #print sitelong,sitelat,sitealt
+                       longitude,latitude,elevation = site_data_2_string(sitelong,sitelat,sitealt)
+                    first_time = False
+
+                # Save filename to master dictionary:
+                master_dict['frame_name'] = np.append(master_dict['frame_name'],f)
+
+                ########## OBTAINING THE TIMES OF OBSERVATION ####################
+                # Get the BJD time. First, add exposure time:
+                if times_method == 1:
+                    utc_time = h0['DATE-OBS']+'T-'+h0['UT-TIME']
+                elif times_method == 2:
+                    utc_time = h0['DATE-OBS']
+                elif times_method == 3:
+                    utc_time = h0['DATE-OBS']+'T-'+h0['TIME-OBS']
+
+                # Get time at the center of the observations (initial + exptime/2):
+                t_center = mdates.date2num(dateutil.parser.parse(\
+                                           utc_time)) + (h0[exptime_h_name]/(2.))*(1./(24.*3600.))
+
+                # Convert back to string:
+                date = (mdates.num2date(t_center))
+                string_date = date_format(date.year,date.month,date.day,\
+                                          date.hour,date.minute,date.second)
+
+                # Prepare object in order to convert this UTC time to BJD time:
+                t = Time(string_date, format='isot', scale='utc', \
+                         location=(str(sitelong)+'d',str(sitelat)+'d',sitealt))
+
+                coords = SkyCoord(h0['RA']+' '+h0['DEC'], unit=(u.hourangle, u.deg))
+
+                # Save UTC, exposure, JD and BJD and LS times. Save also the airmass:
+                master_dict['UTC_times'] = np.append(master_dict['UTC_times'],utc_time)
+                master_dict['exptimes'] = np.append(master_dict['exptimes'],h0[exptime_h_name])
+                master_dict['JD_times'] = np.append(master_dict['JD_times'],t.jd)
+                master_dict['BJD_times'] = np.append(master_dict['BJD_times'],((t.bcor(coords)).jd))
+                if lst_h_name is not None:
+                    master_dict['LST'] = np.append(master_dict['LST'],h0[lst_h_name])
+                else:
+                    t.delta_ut1_utc = 0.
+                    c_lst = str(t.sidereal_time('mean', 'greenwich'))
+                    c_lst = c_lst.split('h')
+                    hh = c_lst[0]
+                    c_lst = c_lst[1].split('m')
+                    mm = c_lst[0]
+                    ss = (c_lst[1])[:-1]
+                    master_dict['LST'] = np.append(master_dict['LST'],hh+':'+mm+':'+ss)
+                if airmass_h_name is not None:
+                    master_dict['airmasses'] = np.append(master_dict['airmasses'],h0[airmass_h_name])
+                else:
+                    year,month,day,hh,mm,ss = getCalDay((t.bcor(coords)).jd)
+                    day = getTime(year,month,day,hh,mm,ss)
+                    master_dict['airmasses'] = np.append(master_dict['airmasses'],getAirmass(central_ra[0],central_dec[0],day,longitude,latitude,elevation))
+
+                ########## OBTAINING THE FLUXES ###################
+                #master_dict['data']['RA_degs'][223],master_dict['data']['DEC_degs'][223] = 19.4620208,0.3419944
+#                     for ext in exts:
+#                         h = hdulist[0]
+                x,y = SkyToPix(h,master_dict['data']['RA_degs'],master_dict['data']['DEC_degs'])
+                # Get fluxes of all the targets in the image for different apertures:
+                print ('\t Performing aperture photometry on objects...')
+                tic = clocking_time.time()
+                if type(egain) == type('str'):
+                    fluxes,errors,x_ref,y_ref,bkg,bkg_err,fwhm = getAperturePhotometry(data,h,x,y,R,\
+                           all_names, frame_name = filename.split('/')[-1], \
+                           out_dir = out_data_folder, GAIN = h[egain], saveplot = False, refine_centroids = refine_cen)
+                else:
+                    fluxes,errors,x_ref,y_ref,bkg,bkg_err,fwhm = getAperturePhotometry(data,h,x,y,R,\
+                           all_names, frame_name = filename.split('/')[-1], \
+                           out_dir = out_data_folder, GAIN = egain, saveplot = False, refine_centroids = refine_cen)
+                #print all_names[71]
+                #print 'Centroids, before:',x[71],y[71]
+                #print 'Centroids, after :',x_ref[71],y_ref[71]
+                toc = clocking_time.time()
+                print ('\t Took {:1.2f} seconds.'.format(toc-tic))
+                # Save everything in the dictionary:
+                for i in range(len(all_names)):
+                    master_dict['data'][all_names[i]]['centroids_x'] = np.append(master_dict['data'][all_names[i]]['centroids_x'],x_ref[i])
+                    master_dict['data'][all_names[i]]['centroids_y'] = np.append(master_dict['data'][all_names[i]]['centroids_y'],y_ref[i])
+                    master_dict['data'][all_names[i]]['background'] = np.append(master_dict['data'][all_names[i]]['background'],bkg[i])
+                    master_dict['data'][all_names[i]]['background_err'] = np.append(master_dict['data'][all_names[i]]['background_err'],bkg_err[i])
+                    master_dict['data'][all_names[i]]['fwhm'] = np.append(master_dict['data'][all_names[i]]['fwhm'],fwhm[i])
+                    for j in range(len(R)):
+                        master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap'] = \
+                            np.append(master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap'],fluxes[i,j])
+                        master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap_err'] = \
+                            np.append(master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap_err'],errors[i,j])
     return master_dict
 
 def organize_files(files,obj_name,filt,leaveout=''):
