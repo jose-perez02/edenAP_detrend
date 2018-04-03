@@ -266,7 +266,6 @@ def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, hdulist, ex
         y_max = hdulist[ext].data.shape[0]
         x,y = SkyToPix(h,all_ra,all_dec)
         for i in range(len(x)):
-
             if x[i]>0 and x[i]<x_max and y[i]>0 and y[i]<y_max:
                 idx.append(i)
                 all_extensions = np.append(all_extensions, ext)
@@ -323,8 +322,9 @@ def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, hdulist, ex
             master_dict['data'][all_names[i]]['fluxes_'+str(r)+'_pix_ap'] = np.array([])
             master_dict['data'][all_names[i]]['fluxes_'+str(r)+'_pix_ap_err'] = np.array([])
 
+    master_dict['data']['names'] = np.array(all_names)
     print ('\t > Extracting data for '+str(len(all_names))+' sources')
-    return master_dict,all_names
+    return master_dict
 
 from astropy.io import fits
 def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filter,\
@@ -514,9 +514,10 @@ def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filte
 #                         print (central_ra, central_dec)
 #                         print (ra_obj, dec_obj)
                     if not updating_dict:
-                        master_dict,all_names = get_dict(central_ra[0],central_dec[0],search_radius,ra_obj,dec_obj,\
+                        master_dict = get_dict(central_ra[0],central_dec[0],search_radius,ra_obj,dec_obj,\
                                                          hdulist, exts, R,date=date)
                     else:
+                        all_names = master_dict['data']['names']
                         all_data = master_dict['data'].keys()
                         all_names_d = []
                         all_idx = []
@@ -599,7 +600,7 @@ def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filte
                     # Get the indices of stars on this extension
                     idx = np.where(master_dict['data']['ext']==ext)
                     # Get the names of stars on this extension
-                    names_ext = np.array(all_names)[idx]
+                    names_ext = master_dict['data']['names'][idx]
                     x,y = SkyToPix(h,master_dict['data']['RA_degs'][idx],master_dict['data']['DEC_degs'][idx])
                     # Get fluxes of all the targets in this extension for different apertures:
                     print ('\t Performing aperture photometry on objects...')

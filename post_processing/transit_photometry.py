@@ -315,7 +315,6 @@ def save_photometry_hs(data,idx,idx_comparison,chosen_aperture,min_aperture,max_
 
 def plot_images(data,idx,idx_comparison,aperture,min_ap,max_ap,out_dir,frames,idx_frames,half_size = 100):
     def plot_im(d,cen_x,cen_y,frame_name,object_name):
-        d = pyfits.getdata(frame_name)
         # Plot image of the target:
         x0 = np.max([0,int(cen_x)-half_size])
         x1 = np.min([int(cen_x)+half_size,d.shape[1]])
@@ -340,8 +339,10 @@ def plot_images(data,idx,idx_comparison,aperture,min_ap,max_ap,out_dir,frames,id
         plt.gca().add_artist(circle)
         plt.gca().add_artist(circle2)
         plt.gca().add_artist(circle3)
-        if not os.path.exists(out_dir+'/'+object_name+'/'+frame_name.split('/')[-1]+'.png'):
-            plt.savefig(out_dir+'/'+object_name+'/'+frame_name.split('/')[-1]+'.png')
+        fname = '{:}/{:}/{:}_{:}.png'.format(out_dir, object_name, 
+                                             frame_name.split('/')[-1], object_name)
+        if not os.path.exists(fname):
+            plt.savefig(fname)
         plt.close()
     # Get the centroids of the target:
     try:
@@ -373,15 +374,23 @@ def plot_images(data,idx,idx_comparison,aperture,min_ap,max_ap,out_dir,frames,id
             all_comp_cen_y = np.vstack((all_comp_cen_y,comp_cen_y))
 
     # Now plot images around centroids plus annulus:
+    exts = np.unique(data['data']['ext']).astype('int')
     nframes = len(frames)
     for i in range(nframes):
-        d = pyfits.getdata(frames[i])
-        # Plot image of the target:
-        plot_im(d,target_cen_x[i],target_cen_y[i],frames[i],'target')
-        # Plot image of the comparisons:
-        for j in range(len(idx_comparison)):
-            idx_c = idx_comparison[j]
-            plot_im(d,all_comp_cen_x[j,i],all_comp_cen_y[j,i],frames[i],'star_'+str(idx_c))
+        for ext in exts:
+            d = pyfits.getdata(frames[i], ext=ext)
+            idx_names = np.where(data['data']['ext']==ext)
+            names_ext = data['data']['names'][idx_names]
+            for name in names_ext:
+                if 'target' in name:
+                    # Plot image of the target:
+                    plot_im(d,target_cen_x[i],target_cen_y[i],frames[i],'target')
+            # Plot image of the comparisons:
+            for j in range(len(idx_comparison)):
+                idx_c = idx_comparison[j]
+                name = 'star_'+str(idx_c)
+                if name in names_ext:
+                    plot_im(d,all_comp_cen_x[j,i],all_comp_cen_y[j,i],frames[i],name)
 
 
 ################ INPUT DATA #####################
@@ -554,14 +563,14 @@ for site in sites:
                 aperture = apertures_to_check[i]
                 relative_flux,relative_flux_err = super_comparison_detrend(data,idx,idx_comparison,aperture,all_idx = idx_frames)
                 save_photometry(times[idx_sort_times],relative_flux[idx_sort_times],relative_flux_err[idx_sort_times],\
-                    post_dir+'post_processing_outputs/',target_name = 'photometry_ap'+str(aperture)+'_pix')
+                                post_dir+'post_processing_outputs/',target_name = 'photometry_ap'+str(aperture)+'_pix')
                 mfilt = medfilt(relative_flux[idx_sort_times],median_window)
                 precision[i] = get_sigma((relative_flux[idx_sort_times] - mfilt)*1e6)
 
         idx_max_prec = np.argmin(precision)
         chosen_aperture = apertures_to_check[idx_max_prec]
         print ('\t >> Best precision achieved at an aperture of ',chosen_aperture,'pixels')
-        print ('\t >> Precision achieved: ',precision[idx_max_prec],'ppm')
+        print ('\t >> Precision achieved: {:.0f} ppm'.format(precision[idx_max_prec]))
 
     if plt_images:
         plot_images(data,idx,idx_comparison,chosen_aperture,min_ap,max_ap,post_dir,data['frame_name'][idx_frames],idx_frames)
