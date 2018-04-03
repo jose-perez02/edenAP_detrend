@@ -368,7 +368,7 @@ for i in range(len(dates_raw)):
                     mymail.send()
                     continue
             # Assuming RA an DEC have been retrieved, run the post-processing algorithm:
-            for ap in ['opt','5','15','20','30']:
+            for ap in ['opt']:
                 p = subprocess.Popen('echo $DISPLAY',stdout = subprocess.PIPE, \
                                      stderr = subprocess.PIPE,shell = True)
                 p.wait()
