@@ -149,8 +149,8 @@ def save_photometry(t, rf, rf_err, output_folder, target_name, plot_data=False, 
     f.close()
     if plot_data:
         # Bin on a n-point window:
-        t_mean = np.mean(t)
-        t_hours = (t - t_mean) * 24.
+        t_min = np.min(t)
+        t_hours = (t - t_min) * 24.
         n_bin = 10
         times_bins = []
         fluxes_bins = []
@@ -162,10 +162,10 @@ def save_photometry(t, rf, rf_err, output_folder, target_name, plot_data=False, 
         
         plt.errorbar(t_hours,rf,rf_err,fmt='o',alpha=0.3,label='Data')
         plt.errorbar(np.array(times_bins),np.array(fluxes_bins),np.array(errors_bins),fmt='o',label='Binned data')
-        plt.xlabel('Hours from {:0.4f} (BJD)'.format(t_mean))
+        plt.xlabel('Time from start (hr)')
         plt.ylabel('Relative flux')
         plt.title(title,fontsize='12')
-        plt.xlim(-0.55*np.ptp(t_hours), 0.55*np.ptp(t_hours))
+        plt.xlim(-0.05*np.ptp(t_hours), 1.05*np.ptp(t_hours))
 #         plt.ylim(0.03,-0.015)
         x_formatter = ticker.ScalarFormatter(useOffset=False)
         plt.gca().xaxis.set_major_formatter(x_formatter)
