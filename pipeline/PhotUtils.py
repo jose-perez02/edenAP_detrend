@@ -266,9 +266,10 @@ def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, hdulist, ex
         y_max = hdulist[ext].data.shape[0]
         x,y = SkyToPix(h,all_ra,all_dec)
         for i in range(len(x)):
-            all_extensions = np.append(all_extensions, ext)
+
             if x[i]>0 and x[i]<x_max and y[i]>0 and y[i]<y_max:
                 idx.append(i)
+                all_extensions = np.append(all_extensions, ext)
 
     # Create dictionary that will save all the data:
     master_dict = {}
@@ -286,7 +287,7 @@ def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, hdulist, ex
     master_dict['data']['IDs'] = all_ids[idx]
     master_dict['data']['DEC_degs'] = all_dec[idx]
     master_dict['data']['RA_coords'],master_dict['data']['DEC_coords'] = DecimalToCoords(all_ra[idx],all_dec[idx])
-    master_dict['data']['ext'] = all_extensions[idx]
+    master_dict['data']['ext'] = all_extensions
     master_dict['data']['Jmag'] = all_j[idx]
     master_dict['data']['Jmag_err'] = all_j_err[idx]
     master_dict['data']['Kmag'] = all_k[idx]
