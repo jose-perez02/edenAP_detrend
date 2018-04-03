@@ -504,10 +504,6 @@ def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filte
                 elif not get_astrometry:
                     hdulist = fits.open(filename+'.fits')
 
-                # Load the data:
-                h = hdulist[1].header
-                data = hdulist[1].data # <------ This will need to be generalized
-
                 # Create master dictionary and define data to be used in the code:    
                 if first_time:
                     if times_method == 2:
@@ -534,11 +530,11 @@ def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filte
                             all_names[i] = all_names_d[idxs[i]]
 
                     if sitelong is None:
-                        sitelong = h[long_h_name]
+                        sitelong = h0[long_h_name]
                     if sitelat is None:
-                        sitelat = h[lat_h_name]
+                        sitelat = h0[lat_h_name]
                     if sitealt is None:
-                        sitealt = h[alt_h_name]
+                        sitealt = h0[alt_h_name]
                     if longitude is None:
                        #print sitelong,sitelat,sitealt
                        longitude,latitude,elevation = site_data_2_string(sitelong,sitelat,sitealt)
@@ -596,37 +592,43 @@ def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filte
 
                 ########## OBTAINING THE FLUXES ###################
                 #master_dict['data']['RA_degs'][223],master_dict['data']['DEC_degs'][223] = 19.4620208,0.3419944
-#                     for ext in exts:
-#                         h = hdulist[0]
-                x,y = SkyToPix(h,master_dict['data']['RA_degs'],master_dict['data']['DEC_degs'])
-                # Get fluxes of all the targets in the image for different apertures:
-                print ('\t Performing aperture photometry on objects...')
-                tic = clocking_time.time()
-                if type(egain) == type('str'):
-                    fluxes,errors,x_ref,y_ref,bkg,bkg_err,fwhm = getAperturePhotometry(data,h,x,y,R,\
-                           all_names, frame_name = filename.split('/')[-1], \
-                           out_dir = out_data_folder, GAIN = h[egain], saveplot = False, refine_centroids = refine_cen)
-                else:
-                    fluxes,errors,x_ref,y_ref,bkg,bkg_err,fwhm = getAperturePhotometry(data,h,x,y,R,\
-                           all_names, frame_name = filename.split('/')[-1], \
-                           out_dir = out_data_folder, GAIN = egain, saveplot = False, refine_centroids = refine_cen)
-                #print all_names[71]
-                #print 'Centroids, before:',x[71],y[71]
-                #print 'Centroids, after :',x_ref[71],y_ref[71]
-                toc = clocking_time.time()
-                print ('\t Took {:1.2f} seconds.'.format(toc-tic))
-                # Save everything in the dictionary:
-                for i in range(len(all_names)):
-                    master_dict['data'][all_names[i]]['centroids_x'] = np.append(master_dict['data'][all_names[i]]['centroids_x'],x_ref[i])
-                    master_dict['data'][all_names[i]]['centroids_y'] = np.append(master_dict['data'][all_names[i]]['centroids_y'],y_ref[i])
-                    master_dict['data'][all_names[i]]['background'] = np.append(master_dict['data'][all_names[i]]['background'],bkg[i])
-                    master_dict['data'][all_names[i]]['background_err'] = np.append(master_dict['data'][all_names[i]]['background_err'],bkg_err[i])
-                    master_dict['data'][all_names[i]]['fwhm'] = np.append(master_dict['data'][all_names[i]]['fwhm'],fwhm[i])
-                    for j in range(len(R)):
-                        master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap'] = \
-                            np.append(master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap'],fluxes[i,j])
-                        master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap_err'] = \
-                            np.append(master_dict['data'][all_names[i]]['fluxes_'+str(R[j])+'_pix_ap_err'],errors[i,j])
+                for ext in exts:
+                    # Load the data:
+                    h = hdulist[ext]
+                    data = hdulist[ext].data
+                    # Get the indices of stars on this extension
+                    idx = np.where(master_dict['data']['ext']==ext)
+                    # Get the names of stars on this extension
+                    names_ext = np.array(all_names)[idx]
+                    x,y = SkyToPix(h,master_dict['data']['RA_degs'][idx],master_dict['data']['DEC_degs'][idx])
+                    # Get fluxes of all the targets in this extension for different apertures:
+                    print ('\t Performing aperture photometry on objects...')
+                    tic = clocking_time.time()
+                    if type(egain) == type('str'):
+                        fluxes,errors,x_ref,y_ref,bkg,bkg_err,fwhm = getAperturePhotometry(data,h,x,y,R,\
+                               names_ext, frame_name = filename.split('/')[-1], \
+                               out_dir = out_data_folder, GAIN = h[egain], saveplot = False, refine_centroids = refine_cen)
+                    else:
+                        fluxes,errors,x_ref,y_ref,bkg,bkg_err,fwhm = getAperturePhotometry(data,h,x,y,R,\
+                               names_ext, frame_name = filename.split('/')[-1], \
+                               out_dir = out_data_folder, GAIN = egain, saveplot = False, refine_centroids = refine_cen)
+                    #print all_names[71]
+                    #print 'Centroids, before:',x[71],y[71]
+                    #print 'Centroids, after :',x_ref[71],y_ref[71]
+                    toc = clocking_time.time()
+                    print ('\t Took {:1.2f} seconds.'.format(toc-tic))
+                    # Save everything in the dictionary:
+                    for i in range(len(names_ext)):
+                        master_dict['data'][names_ext[i]]['centroids_x'] = np.append(master_dict['data'][names_ext[i]]['centroids_x'],x_ref[i])
+                        master_dict['data'][names_ext[i]]['centroids_y'] = np.append(master_dict['data'][names_ext[i]]['centroids_y'],y_ref[i])
+                        master_dict['data'][names_ext[i]]['background'] = np.append(master_dict['data'][names_ext[i]]['background'],bkg[i])
+                        master_dict['data'][names_ext[i]]['background_err'] = np.append(master_dict['data'][names_ext[i]]['background_err'],bkg_err[i])
+                        master_dict['data'][names_ext[i]]['fwhm'] = np.append(master_dict['data'][names_ext[i]]['fwhm'],fwhm[i])
+                        for j in range(len(R)):
+                            master_dict['data'][names_ext[i]]['fluxes_'+str(R[j])+'_pix_ap'] = \
+                                np.append(master_dict['data'][names_ext[i]]['fluxes_'+str(R[j])+'_pix_ap'],fluxes[i,j])
+                            master_dict['data'][names_ext[i]]['fluxes_'+str(R[j])+'_pix_ap_err'] = \
+                                np.append(master_dict['data'][names_ext[i]]['fluxes_'+str(R[j])+'_pix_ap_err'],errors[i,j])
     return master_dict
 
 def organize_files(files,obj_name,filt,leaveout=''):
