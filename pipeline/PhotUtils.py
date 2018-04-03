@@ -1282,7 +1282,7 @@ def get_general_coords(target,date):
         result = Simbad.query_object(target)
     except:
         # Manually load values
-         coords_file = open('../manual_object_coords.dat','r')
+        coords_file = open('../manual_object_coords.dat','r')
         while True:
             line = coords_file.readline()
             if line != '':
