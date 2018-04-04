@@ -903,79 +903,79 @@ def getAperturePhotometry(d,h,x,y,R,target_names, frame_name = None, out_dir = N
     return fluxes,fluxes_err,x_ref,y_ref,bkg,bkg_err,fwhm
 
 def getCentroidsAndFluxes(i):
-       fluxes_R = np.ones(len(global_R))*(-1)
-       fluxes_err_R = np.ones(len(global_R))*(-1)
-       #print fluxes_R
-       # Generate a sub-image around the centroid, if centroid is inside the image:
-       if global_x[i]>0 and global_x[i]<global_d.shape[1] and \
-           global_y[i]>0 and global_y[i]<global_d.shape[0]:
-           #if 'target' in global_target_names[i]:
-           #    print 'im in!!'
-           x0 = np.max([0,int(global_x[i])-global_half_size])
-           x1 = np.min([int(global_x[i])+global_half_size,global_d.shape[1]])
-           y0 = np.max([0,int(global_y[i])-global_half_size])
-           y1 = np.min([int(global_y[i])+global_half_size,global_d.shape[0]])
-           subimg = np.float64(np.copy(global_d[y0:y1,x0:x1]))
+    fluxes_R = np.ones(len(global_R))*(-1)
+    fluxes_err_R = np.ones(len(global_R))*(-1)
+    #print fluxes_R
+    # Generate a sub-image around the centroid, if centroid is inside the image:
+    if global_x[i]>0 and global_x[i]<global_d.shape[1] and \
+        global_y[i]>0 and global_y[i]<global_d.shape[0]:
+        #if 'target' in global_target_names[i]:
+        #    print 'im in!!'
+        x0 = np.max([0,int(global_x[i])-global_half_size])
+        x1 = np.min([int(global_x[i])+global_half_size,global_d.shape[1]])
+        y0 = np.max([0,int(global_y[i])-global_half_size])
+        y1 = np.min([int(global_y[i])+global_half_size,global_d.shape[0]])
+        subimg = np.float64(np.copy(global_d[y0:y1,x0:x1]))
 
-           # Substract the (background) median counts, get estimate 
-           # of the sky std dev:
-           background = np.median(subimg)
-           background_sigma = 1.48 * mad(subimg)
-           subimg -= background
-           sky_sigma = np.ones(subimg.shape)*background_sigma
-           x_cen = global_x[i] - x0
-           y_cen = global_y[i] - y0
-           if global_refine_centroids:
-               # If refine centroids is true, apply a gaussian filter 
-               # first (in case image is defocused):
-               gauss_filtered_subimg = gaussian_filter(subimg,sigma_gf)
-               # Estimate the background in this filtered image:
-               bkg_sigma = 1.48 * mad(gauss_filtered_subimg)
-               # Identify the sources via daofind if everything is ok:
-               try:
-                   sources = daofind(gauss_filtered_subimg, fwhm=10.0*fwhm_factor, threshold=10*bkg_sigma)
-                   xcents = sources['xcentroid']
-                   ycents = sources['ycentroid']
-                   dists = np.sqrt( (x_cen-xcents)**2 + (y_cen-ycents)**2 )
-                   idx_min = np.where(dists == np.min(dists))[0]
-                   if(len(idx_min)>1):
-                       idx_min = idx_min[0]
-                   if xcents[idx_min][0] < subimg.shape[0] and xcents[idx_min][0]>0:
-                       x_cen = xcents[idx_min][0]
-                   if ycents[idx_min][0] < subimg.shape[1] and ycents[idx_min][0]>0:
-                       y_cen = ycents[idx_min][0]
-               except:
-                   '\t Daofind failed. Using astrometric centroids...'
-           #x_cen = x_cen
-           #y_cen = y_cen
-           x_ref = x0 + x_cen
-           y_ref = y0 + y_cen
+        # Substract the (background) median counts, get estimate 
+        # of the sky std dev:
+        background = np.median(subimg)
+        background_sigma = 1.48 * mad(subimg)
+        subimg -= background
+        sky_sigma = np.ones(subimg.shape)*background_sigma
+        x_cen = global_x[i] - x0
+        y_cen = global_y[i] - y0
+        if global_refine_centroids:
+            # If refine centroids is true, apply a gaussian filter 
+            # first (in case image is defocused):
+            gauss_filtered_subimg = gaussian_filter(subimg,sigma_gf)
+            # Estimate the background in this filtered image:
+            bkg_sigma = 1.48 * mad(gauss_filtered_subimg)
+            # Identify the sources via daofind if everything is ok:
+            try:
+                sources = daofind(gauss_filtered_subimg, fwhm=10.0*fwhm_factor, threshold=10*bkg_sigma)
+                xcents = sources['xcentroid']
+                ycents = sources['ycentroid']
+                dists = np.sqrt( (x_cen-xcents)**2 + (y_cen-ycents)**2 )
+                idx_min = np.where(dists == np.min(dists))[0]
+                if(len(idx_min)>1):
+                    idx_min = idx_min[0]
+                if xcents[idx_min][0] < subimg.shape[0] and xcents[idx_min][0]>0:
+                    x_cen = xcents[idx_min][0]
+                if ycents[idx_min][0] < subimg.shape[1] and ycents[idx_min][0]>0:
+                    y_cen = ycents[idx_min][0]
+            except:
+                '\t Daofind failed. Using astrometric centroids...'
+        #x_cen = x_cen
+        #y_cen = y_cen
+        x_ref = x0 + x_cen
+        y_ref = y0 + y_cen
 
-           # If saveplot is True, save image and the centroid:
-           if global_saveplot and ('target' in global_target_names[i]):
-               #print 'Got inside!'
-               if not os.path.exists(global_out_dir+global_target_names[i]):
-                   os.mkdir(global_out_dir+global_target_names[i])
-               im = plt.imshow(subimg)
-               im.set_clim(0,1000)
-               plt.plot(x_cen,y_cen,'wx',markersize=15,alpha=0.5)
-               circle = plt.Circle((x_cen,y_cen),np.min(global_R),color='black',fill=False)
-               circle2 = plt.Circle((x_cen,y_cen),np.max(global_R),color='black',fill=False)
-               plt.gca().add_artist(circle)
-               plt.gca().add_artist(circle2)
-               if not os.path.exists(global_out_dir+global_target_names[i]+'/'+global_frame_name+'.png'):
-                   plt.savefig(global_out_dir+global_target_names[i]+'/'+global_frame_name+'.png')
-               plt.close()
-           # With the calculated centroids, get aperture photometry:
-           for j in range(len(global_R)):
-               fluxes_R[j],fluxes_err_R[j] = getApertureFluxes(subimg,x_cen,y_cen,global_R[j],sky_sigma,global_GAIN)
-           #if 'target' in global_target_names[i]:
-           #    print fluxes_R[0],fluxes_R[-1]
-           return fluxes_R, fluxes_err_R, x_ref, y_ref,background,background_sigma,estimate_fwhm(subimg,x_cen,y_cen)
-       else:
-           #if 'target' in global_target_names[i]:
-           #    print 'im NOT in for ',global_target_names[i]
-           return fluxes_R, fluxes_err_R, global_x[i], global_y[i],0.,0.,0.
+        # If saveplot is True, save image and the centroid:
+        if global_saveplot and ('target' in global_target_names[i]):
+            #print 'Got inside!'
+            if not os.path.exists(global_out_dir+global_target_names[i]):
+                os.mkdir(global_out_dir+global_target_names[i])
+            im = plt.imshow(subimg)
+            im.set_clim(0,1000)
+            plt.plot(x_cen,y_cen,'wx',markersize=15,alpha=0.5)
+            circle = plt.Circle((x_cen,y_cen),np.min(global_R),color='black',fill=False)
+            circle2 = plt.Circle((x_cen,y_cen),np.max(global_R),color='black',fill=False)
+            plt.gca().add_artist(circle)
+            plt.gca().add_artist(circle2)
+            if not os.path.exists(global_out_dir+global_target_names[i]+'/'+global_frame_name+'.png'):
+                plt.savefig(global_out_dir+global_target_names[i]+'/'+global_frame_name+'.png')
+            plt.close()
+        # With the calculated centroids, get aperture photometry:
+        for j in range(len(global_R)):
+            fluxes_R[j],fluxes_err_R[j] = getApertureFluxes(subimg,x_cen,y_cen,global_R[j],sky_sigma,global_GAIN)
+        #if 'target' in global_target_names[i]:
+        #    print fluxes_R[0],fluxes_R[-1]
+        return fluxes_R, fluxes_err_R, x_ref, y_ref,background,background_sigma,estimate_fwhm(subimg,x_cen,y_cen)
+    else:
+        #if 'target' in global_target_names[i]:
+        #    print 'im NOT in for ',global_target_names[i]
+        return fluxes_R, fluxes_err_R, global_x[i], global_y[i],0.,0.,0.
 
 def estimate_fwhm(data,x0,y0):
     """
