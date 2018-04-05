@@ -400,6 +400,22 @@ def plot_images(data,idx,idx_comparison,aperture,min_ap,max_ap,out_dir,frames,id
                 if name in names_ext:
                     plot_im(d,all_comp_cen_x[j,i],all_comp_cen_y[j,i],frames[i],name)
 
+def plot_cmd(colors, data, idx_target, idx_comparison, post_dir):
+    """
+    Plot the color-magnitude diagram of all stars, 
+    indicating the target and selected comparison stars.
+    """
+    ms = plt.rcParams['lines.markersize']
+    plt.plot(colors,data['data']['Jmag'],'b.', label='All stars')
+    plt.plot(colors[idx],data['data']['Jmag'][idx],'ro',ms=ms*2, label='Target')
+    plt.plot(colors[idx_comparison],data['data']['Jmag'][idx_comparison],'r.', label='Selected comparisons')
+    plt.title('Color-magnitude diagram of stars')
+    plt.xlabel('J$-$H color')
+    plt.ylabel('J (mag)')
+    plt.legend(loc='best')
+    plt.gca().invert_yaxis()
+    plt.savefig(post_dir+'CMD.pdf')
+    plt.close()
 
 ################ INPUT DATA #####################
 
@@ -459,7 +475,10 @@ elif telescope == 'CHAT':
 else:
     foldername = cf +'red/'+date+'/'+target_name+'-'+band+'/'
 
-print (foldername)
+post_dir = foldername+'post_processing/'
+if not os.path.exists(post_dir):
+    os.mkdir(post_dir)
+
 filename = 'photometry.pkl'
 target_coords = [[args.ra,args.dec.split()[0]]]
 min_ap = int(args.minap)
@@ -514,9 +533,9 @@ distance = np.sqrt((all_ras-target_ra)**2 + (all_decs-target_dec)**2)
 idx = (np.where(distance == np.min(distance))[0])[0]
 # Search for closest stars in color to target star:
 target_hmag,target_jmag = data['data']['Hmag'][idx],data['data']['Jmag'][idx]
-colors = data['data']['Hmag']-data['data']['Jmag']
+colors = data['data']['Jmag']-data['data']['Hmag']
 target_color = target_hmag-target_jmag
-distance = np.sqrt(((colors-target_color))**2. + (target_jmag-(data['data']['Jmag']))**2.)
+distance = np.sqrt((colors-target_color)**2. + (target_jmag-data['data']['Jmag'])**2.)
 idx_distances = np.argsort(distance)
 idx_comparison = []
 # Select brightest stars whithin 2.5 of the targets star flux first:
@@ -536,11 +555,8 @@ for i in idx_distances:
     if len(idx_comparison)==ncomp:
         break
 
-if all_plots:
-    plt.plot(colors,data['data']['Jmag'],'r.')
-    plt.plot(colors[idx],data['data']['Jmag'][idx],'ro',alpha=0.5)
-    plt.plot(colors[idx_comparison],data['data']['Jmag'][idx_comparison],'b.')
-    plt.show()
+# Plot the color-magnitude diagram
+plot_cmd(colors, data, idx, idx_comparison, post_dir)
 
 print ('\t',len(idx_comparison),' comparison stars!')
 for site in sites:
@@ -550,9 +566,6 @@ for site in sites:
     idx_sort_times = np.argsort(times)
     cam = (site.split('+')[-1]).split('-')[-1]
     print ('\t Frames:',data['frame_name'][idx_frames])
-    post_dir = foldername+'post_processing/'
-    if not os.path.exists(post_dir):
-        os.mkdir(post_dir)
     # Check which is the aperture that gives a minimum rms:
     if force_aperture:
         print ('\t Forced aperture to ',forced_aperture)
