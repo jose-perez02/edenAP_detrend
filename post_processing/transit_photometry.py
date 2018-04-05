@@ -324,37 +324,38 @@ def save_photometry_hs(data, idx, idx_comparison,
     f.close()
 
 def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap, 
-                out_dir, frames, idx_frames, half_size=100, overwrite=False):
-    def plot_im(d, cen_x, cen_y, frame_name, object_name, overwrite):
+                out_dir, frames, idx_frames, half_size=50, overwrite=False):
+    def plot_im(d, cen_x, cen_y, obj_x, obj_y, half_size, frame_name, object_name, overwrite):
         if not os.path.exists(out_dir+object_name):
             os.mkdir(out_dir+object_name)
         fname = '{:}/{:}/{:}_{:}.png'.format(out_dir, object_name, 
                                              frame_name.split('/')[-1], object_name)
         if not os.path.exists(fname) or overwrite:
             # Plot image of the target:
+            fig = plt.figure()
             x0 = np.max([0,int(cen_x)-half_size])
             x1 = np.min([int(cen_x)+half_size,d.shape[1]])
             y0 = np.max([0,int(cen_y)-half_size])
             y1 = np.min([int(cen_y)+half_size,d.shape[0]])
             subimg = np.copy(d[y0:y1,x0:x1])
             subimg = subimg - np.median(subimg)
-            x_cen = cen_x - x0
-            y_cen = cen_y - y0
+            x_cen = obj_x - x0
+            y_cen = obj_y - y0
             im = plt.imshow(subimg)
-            im.set_clim(0,1000)
-            plt.plot(x_cen,y_cen,'wx',markersize=15,alpha=0.5)
-            circle = plt.Circle((x_cen,y_cen),min_ap,color='black',fill=False)
-            circle2 = plt.Circle((x_cen,y_cen),max_ap,color='black',fill=False)
-            circle3 = plt.Circle((x_cen,y_cen),aperture,color='white',fill=False)
+            im.set_clim(0, 1000)
+            plt.plot(x_cen, y_cen, 'wx', markersize=15, alpha=0.5)
+            circle = plt.Circle((x_cen, y_cen), min_ap, color='black', fill=False)
+            circle2 = plt.Circle((x_cen ,y_cen), max_ap, color='black', fill=False)
+            circle3 = plt.Circle((x_cen, y_cen), aperture, color='white', fill=False)
             plt.gca().add_artist(circle)
             plt.gca().add_artist(circle2)
             plt.gca().add_artist(circle3)
-            plt.close()
             plt.savefig(fname)
+            plt.close()
             if object_name=='target':
                 print (frame_name)
                 print ('Max flux:',np.max(subimg))
-                print ('Centroid:',cen_x,cen_y)
+                print ('Centroid:',cen_x, cen_y)
         
     # Get the centroids of the target:
     try:
@@ -396,15 +397,17 @@ def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap,
             for name in names_ext:
                 if 'target' in name:
                     # Plot image of the target:
-                    plot_im(d, target_cen_x[i], target_cen_y[i],
-                            frames[i],'target', overwrite)
+                    plot_im(d, target_cen_x[0], target_cen_y[0],
+                            target_cen_x[i], target_cen_y[i],
+                            half_size, frames[i],'target', overwrite)
             # Plot image of the comparisons:
             for j in range(len(idx_comparison)):
                 idx_c = idx_comparison[j]
                 name = 'star_'+str(idx_c)
                 if name in names_ext:
-                    plot_im(d, all_comp_cen_x[j,i], all_comp_cen_y[j,i], 
-                            frames[i],name, overwrite)
+                    plot_im(d, all_comp_cen_x[j,0], all_comp_cen_y[j,0], 
+                            all_comp_cen_x[j,i], all_comp_cen_y[j,i], 
+                            half_size, frames[i],name, overwrite)
 
 def plot_cmd(colors, data, idx_target, idx_comparison, post_dir):
     """
@@ -606,7 +609,7 @@ for site in sites:
 
     if plt_images:
         plot_images(data, idx, idx_comparison, chosen_aperture, min_ap, max_ap, 
-                    post_dir, data['frame_name'][idx_frames], idx_frames, overwrite)
+                    post_dir, data['frame_name'][idx_frames], idx_frames, overwrite=overwrite)
 
     # Save and plot final LCs:
     print ('\t Getting final relative flux...')
