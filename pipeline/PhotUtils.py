@@ -813,9 +813,23 @@ def run_astrometry(filename, ra=None, dec=None, radius=None, scale_low= 0.1, sca
     with pyfits.open(filename) as hdulist:
         for ext in exts:
             ext_fname = filename.replace('.fits', '_'+str(ext)+'.wcs.fits')
-            with pyfits.open(ext_fname) as hdulist_new:
-                hdulist[ext].header = hdulist_new[1].header
-            os.remove(ext_fname)
+            try:
+                with pyfits.open(ext_fname) as hdulist_new:
+                    hdulist[ext].header = hdulist_new[1].header
+            except:
+                data_dir = '/'.join(filename.split('/')[:-1])
+                this_file = filename.split('/')[-1]
+                this_frame = get_trailing_number(this_file.replace('.fits', ''))
+                last_frame = this_frame - 1
+                last_file = str(last_frame).join(this_file.split(str(this_frame)))
+                last_filename = '/'.join([data_dir, last_file])
+                last_wcs_filename = last_filename.replace('.fits', '.wcs.fits')
+                print('\t\t Astronometry failed for extension {:}'.format(ext))
+                print('\t\t Using WCS info from previous frame {:}'.format(last_wcs_filename))
+                with pyfits.open(last_wcs_filename) as hdulist_new:
+                    hdulist[ext].header = hdulist_new[ext].header
+            else:
+                os.remove(ext_fname)
         hdulist.writeto(filename.replace('.fits', '.wcs.fits'))
         
                         
@@ -1332,4 +1346,8 @@ def get_general_coords(target,date):
         dec_sec = (np.abs(c_dec-dec_deg)-dec_min/60.)*3600.
         return NumToStr(ra_hr)+':'+NumToStr(ra_min)+':'+NumToStr(ra_sec,roundto=3),\
                NumToStr(dec_deg)+':'+NumToStr(dec_min)+':'+NumToStr(dec_sec,roundto=3)
-    
+
+import re
+def get_trailing_number(s):
+    m = re.search(r'\d+$', s)
+    return int(m.group()) if m else None
