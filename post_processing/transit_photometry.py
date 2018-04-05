@@ -325,7 +325,7 @@ def save_photometry_hs(data, idx, idx_comparison,
 
 def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap, 
                 out_dir, frames, idx_frames, half_size=100, overwrite=False):
-    def plot_im(d,cen_x,cen_y,frame_name,object_name):
+    def plot_im(d, cen_x, cen_y, frame_name, object_name, overwrite):
         if not os.path.exists(out_dir+object_name):
             os.mkdir(out_dir+object_name)
         fname = '{:}/{:}/{:}_{:}.png'.format(out_dir, object_name, 
@@ -396,13 +396,15 @@ def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap,
             for name in names_ext:
                 if 'target' in name:
                     # Plot image of the target:
-                    plot_im(d,target_cen_x[i],target_cen_y[i],frames[i],'target')
+                    plot_im(d, target_cen_x[i], target_cen_y[i],
+                            frames[i],'target', overwrite)
             # Plot image of the comparisons:
             for j in range(len(idx_comparison)):
                 idx_c = idx_comparison[j]
                 name = 'star_'+str(idx_c)
                 if name in names_ext:
-                    plot_im(d,all_comp_cen_x[j,i],all_comp_cen_y[j,i],frames[i],name)
+                    plot_im(d, all_comp_cen_x[j,i], all_comp_cen_y[j,i], 
+                            frames[i],name, overwrite)
 
 def plot_cmd(colors, data, idx_target, idx_comparison, post_dir):
     """
