@@ -8,7 +8,7 @@ import pickle
 import astropy.io.fits as pyfits
 import matplotlib
 # Force matplotlib to not use any Xwindows backend.
-matplotlib.use('Agg')
+# matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 
@@ -160,6 +160,7 @@ def save_photometry(t, rf, rf_err, output_folder, target_name, plot_data=False, 
             fluxes_bins.append(np.median(rf[i:i+n_bin-1]))
             errors_bins.append(np.sqrt(np.sum(rf_err[i:i+n_bin-1]**2))/np.double(n_bin))
         
+        fig = plt.figure()
         plt.errorbar(t_hours,rf,rf_err,fmt='o',alpha=0.3,label='Data')
         plt.errorbar(np.array(times_bins),np.array(fluxes_bins),np.array(errors_bins),fmt='o',label='Binned data')
         plt.xlabel('Time from start (hr)')
@@ -175,6 +176,7 @@ def save_photometry(t, rf, rf_err, output_folder, target_name, plot_data=False, 
         plt.gca().xaxis.set_major_formatter(x_formatter)
         plt.legend()
         plt.savefig(output_folder+target_name+'.pdf')
+        plt.close()
 
 def save_photometry_hs(data, idx, idx_comparison, 
                        chosen_aperture, min_aperture, max_aperture,
@@ -321,37 +323,39 @@ def save_photometry_hs(data, idx, idx_comparison,
         f.write('{0:>23}    {1:.6f}    {2:.6f}    {3:.4f}    {4:.4f}\n'.format(all_ids[i]+'.epdlc', all_ras[i], all_decs[i], all_mags[i], all_rms[i]))
     f.close()
 
-def plot_images(data,idx,idx_comparison,aperture,min_ap,max_ap,out_dir,frames,idx_frames,half_size = 100):
+def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap, 
+                out_dir, frames, idx_frames, half_size=100, overwrite=False):
     def plot_im(d,cen_x,cen_y,frame_name,object_name):
-        # Plot image of the target:
-        x0 = np.max([0,int(cen_x)-half_size])
-        x1 = np.min([int(cen_x)+half_size,d.shape[1]])
-        y0 = np.max([0,int(cen_y)-half_size])
-        y1 = np.min([int(cen_y)+half_size,d.shape[0]])
-        subimg = np.copy(d[y0:y1,x0:x1])
-        subimg = subimg - np.median(subimg)
-        x_cen = cen_x - x0
-        y_cen = cen_y - y0
         if not os.path.exists(out_dir+object_name):
             os.mkdir(out_dir+object_name)
-        im = plt.imshow(subimg)
-        if object_name == 'target':
-            print (frame_name)
-            print ('Max flux:',np.max(subimg))
-            print ('Centroid:',cen_x,cen_y)
-        im.set_clim(0,1000)
-        plt.plot(x_cen,y_cen,'wx',markersize=15,alpha=0.5)
-        circle = plt.Circle((x_cen,y_cen),min_ap,color='black',fill=False)
-        circle2 = plt.Circle((x_cen,y_cen),max_ap,color='black',fill=False)
-        circle3 = plt.Circle((x_cen,y_cen),aperture,color='white',fill=False)
-        plt.gca().add_artist(circle)
-        plt.gca().add_artist(circle2)
-        plt.gca().add_artist(circle3)
         fname = '{:}/{:}/{:}_{:}.png'.format(out_dir, object_name, 
                                              frame_name.split('/')[-1], object_name)
-        if not os.path.exists(fname):
+        if not os.path.exists(fname) or overwrite:
+            # Plot image of the target:
+            x0 = np.max([0,int(cen_x)-half_size])
+            x1 = np.min([int(cen_x)+half_size,d.shape[1]])
+            y0 = np.max([0,int(cen_y)-half_size])
+            y1 = np.min([int(cen_y)+half_size,d.shape[0]])
+            subimg = np.copy(d[y0:y1,x0:x1])
+            subimg = subimg - np.median(subimg)
+            x_cen = cen_x - x0
+            y_cen = cen_y - y0
+            im = plt.imshow(subimg)
+            im.set_clim(0,1000)
+            plt.plot(x_cen,y_cen,'wx',markersize=15,alpha=0.5)
+            circle = plt.Circle((x_cen,y_cen),min_ap,color='black',fill=False)
+            circle2 = plt.Circle((x_cen,y_cen),max_ap,color='black',fill=False)
+            circle3 = plt.Circle((x_cen,y_cen),aperture,color='white',fill=False)
+            plt.gca().add_artist(circle)
+            plt.gca().add_artist(circle2)
+            plt.gca().add_artist(circle3)
+            plt.close()
             plt.savefig(fname)
-        plt.close()
+            if object_name=='target':
+                print (frame_name)
+                print ('Max flux:',np.max(subimg))
+                print ('Centroid:',cen_x,cen_y)
+        
     # Get the centroids of the target:
     try:
         target_cen_x = data['data']['star_'+str(idx)]['centroids_x'][idx_frames]
@@ -362,8 +366,8 @@ def plot_images(data,idx,idx_comparison,aperture,min_ap,max_ap,out_dir,frames,id
         target_cen_y = data['data']['target_star_'+str(idx)]['centroids_y'][idx_frames]
         print ('Target:','target_star_'+str(idx))
 
-        print (target_cen_x)
-        print (target_cen_y)
+#         print (target_cen_x)
+#         print (target_cen_y)
 
     # Same for the comparison stars:
     for i in range(len(idx_comparison)):
@@ -406,6 +410,7 @@ def plot_cmd(colors, data, idx_target, idx_comparison, post_dir):
     indicating the target and selected comparison stars.
     """
     ms = plt.rcParams['lines.markersize']
+    fig = plt.figure()
     plt.plot(colors,data['data']['Jmag'],'b.', label='All stars')
     plt.plot(colors[idx],data['data']['Jmag'][idx],'ro',ms=ms*2, label='Target')
     plt.plot(colors[idx_comparison],data['data']['Jmag'][idx_comparison],'r.', label='Selected comparisons')
@@ -440,12 +445,16 @@ parser.add_argument('--plt_images', dest='plt_images', action='store_true')
 parser.set_defaults(plt_images=False)
 parser.add_argument('--all_plots', dest='all_plots', action='store_true')
 parser.set_defaults(all_plots=False)
+parser.add_argument('--overwrite', dest='overwrite', action='store_true')
+parser.set_defaults(overwrite=False)
+
 args = parser.parse_args()
 
 force_aperture = args.force_aperture
 autosaveLC = args.autosaveLC
 plt_images = args.plt_images
 all_plots = args.all_plots
+overwrite = args.overwrite
 telescope = args.telescope
 target_name = args.target_name
 telescope = args.telescope
@@ -594,7 +603,8 @@ for site in sites:
         print ('\t >> Precision achieved: {:.0f} ppm'.format(precision[idx_max_prec]))
 
     if plt_images:
-        plot_images(data,idx,idx_comparison,chosen_aperture,min_ap,max_ap,post_dir,data['frame_name'][idx_frames],idx_frames)
+        plot_images(data, idx, idx_comparison, chosen_aperture, min_ap, max_ap, 
+                    post_dir, data['frame_name'][idx_frames], idx_frames, overwrite)
 
     # Save and plot final LCs:
     print ('\t Getting final relative flux...')
