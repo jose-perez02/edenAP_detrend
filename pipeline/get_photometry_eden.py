@@ -171,13 +171,16 @@ for i in range(len(all_objects)):
         print('\t Found photometry.pkl')
         master_dict = pickle.load(open(out_data_folder+'photometry.pkl','rb'))
 
-    # Get master dictionary for photometry:
-    master_dict = PhotUtils.getPhotometry(all_files,telescope,R,ra_obj,dec_obj,out_data_folder,filter,\
-                                          get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
-                                          gf_opt = gf_opt_astrometry)
+    # Get master dictionary for photometry, saving progress every 10 files:
+    n_chunks = int(len(all_files)/10)
+    chunked_files = np.array_split(all_files, n_chunks)
+    for chunk in chunked_files:
+        master_dict = PhotUtils.getPhotometry(chunk,telescope,R,ra_obj,dec_obj,out_data_folder,filter,\
+                                              get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
+                                              gf_opt = gf_opt_astrometry)
 
-    # Save dictionary:
-    print ('\t Saving photometry at '+out_data_folder+'...')
-    OUT_FILE = open(out_data_folder+'photometry.pkl','wb')
-    pickle.dump(master_dict,OUT_FILE)
-    OUT_FILE.close() 
+        # Save dictionary:
+        print ('\t Saving photometry at '+out_data_folder+'...')
+        OUT_FILE = open(out_data_folder+'photometry.pkl','wb')
+        pickle.dump(master_dict,OUT_FILE)
+        OUT_FILE.close() 
