@@ -160,15 +160,11 @@ def save_photometry(t, rf, rf_err, output_folder, target_name, plot_data=False, 
             fluxes_bins.append(np.median(rf[i:i+n_bin-1]))
             errors_bins.append(np.sqrt(np.sum(rf_err[i:i+n_bin-1]**2))/np.double(n_bin))
         
-        std_dev = np.std(rf)
-        print('Standard deviation:', np.std(rf))
+        # Calculate standard deviation of median filtered data
         mfilt = median_filter(rf)
         sigma = get_sigma(rf-mfilt)
         sigma_mag = -2.5*np.log10((1.-sigma)/1.)
-        print('Sigma:', sigma*1e6)
-        print('Sigma (mag):', sigma*1e3)
-        print(-2.5*np.log10((1.-np.std(rf))/1.))
-        print(np.std(rf_mag))
+        # Make plot
         fig = plt.figure()
         plt.errorbar(t_hours,rf,rf_err,fmt='o',alpha=0.3,label='Data')
         plt.errorbar(np.array(times_bins),np.array(fluxes_bins),np.array(errors_bins),fmt='o',label='Binned data')
@@ -612,8 +608,9 @@ for site in sites:
         for i in range(len(apertures_to_check)):
             aperture = apertures_to_check[i]
             relative_flux,relative_flux_err = super_comparison_detrend(data,idx,idx_comparison,aperture,all_idx = idx_frames)
-            save_photometry(times[idx_sort_times],relative_flux[idx_sort_times],relative_flux_err[idx_sort_times],\
-                            post_dir+'post_processing_outputs/',target_name = 'photometry_ap'+str(aperture)+'_pix')
+            save_photometry(times[idx_sort_times], relative_flux[idx_sort_times], relative_flux_err[idx_sort_times],
+                            post_dir+'post_processing_outputs/', target_name='photometry_ap'+str(aperture)+'_pix',
+                            plot_data=True)
             mfilt = median_filter(relative_flux[idx_sort_times])
             precision[i] = get_sigma((relative_flux[idx_sort_times] - mfilt)*1e6)
 
