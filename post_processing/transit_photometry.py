@@ -607,7 +607,8 @@ for site in sites:
 
         for i in range(len(apertures_to_check)):
             aperture = apertures_to_check[i]
-            relative_flux,relative_flux_err = super_comparison_detrend(data,idx,idx_comparison,aperture,all_idx = idx_frames)
+            # Check the target
+            relative_flux, relative_flux_err = super_comparison_detrend(data, idx, idx_comparison, aperture, all_idx = idx_frames)
             save_photometry(times[idx_sort_times], relative_flux[idx_sort_times], relative_flux_err[idx_sort_times],
                             post_dir+'post_processing_outputs/', target_name='photometry_ap'+str(aperture)+'_pix',
                             plot_data=True)
@@ -618,7 +619,18 @@ for site in sites:
         chosen_aperture = apertures_to_check[idx_max_prec]
         print ('\t >> Best precision achieved at an aperture of ',chosen_aperture,'pixels')
         print ('\t >> Precision achieved: {:.0f} ppm'.format(precision[idx_max_prec]))
+        # And while we're at it, check the comparisons too
+        if not os.path.exists(post_dir+'comp_light_curves/'):
+            os.mkdir(post_dir+'comp_light_curves/')
+        idx_comps = np.array(idx_comparison)
+        for i_c in idx_comps:
+            idx_c = idx_comps[np.where(idx_comps!=i_c)]
+            rf_comp, rf_comp_err = super_comparison_detrend(data, i_c, idx_c, chosen_aperture, all_idx = idx_frames)
+            save_photometry(times[idx_sort_times], rf_comp[idx_sort_times], rf_comp_err[idx_sort_times],
+                            post_dir+'comp_light_curves/', target_name='star_{:}_photometry_ap{:}_pix'.format(i_c, aperture),
+                            plot_data=True)
 
+    # Saving sub-images
     if plt_images:
         plot_images(data, idx, idx_comparison, chosen_aperture, min_ap, max_ap, 
                     post_dir, data['frame_name'][idx_frames], idx_frames, overwrite=overwrite)
