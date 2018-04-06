@@ -627,7 +627,7 @@ for site in sites:
             idx_c = idx_comps[np.where(idx_comps!=i_c)]
             rf_comp, rf_comp_err = super_comparison_detrend(data, i_c, idx_c, chosen_aperture, all_idx = idx_frames)
             save_photometry(times[idx_sort_times], rf_comp[idx_sort_times], rf_comp_err[idx_sort_times],
-                            post_dir+'comp_light_curves/', target_name='star_{:}_photometry_ap{:}_pix'.format(i_c, aperture),
+                            post_dir+'comp_light_curves/', target_name='star_{:}_photometry_ap{:}_pix'.format(i_c, chosen_aperture),
                             plot_data=True)
 
     # Saving sub-images
