@@ -333,10 +333,10 @@ def save_photometry_hs(data, idx, idx_comparison,
 def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap, 
                 out_dir, frames, idx_frames, half_size=50, overwrite=False):
     def plot_im(d, cen_x, cen_y, obj_x, obj_y, half_size, frame_name, object_name, overwrite):
-        if not os.path.exists(out_dir+object_name):
-            os.mkdir(out_dir+object_name)
-        fname = '{:}/{:}/{:}_{:}.png'.format(out_dir, object_name, 
-                                             frame_name.split('/')[-1], object_name)
+        if not os.path.exists(out_dir+'sub_imgs/'+object_name):
+            os.makedirs(out_dir+'sub_imgs/'+object_name)
+        fname = '{:}/sub_imgs/{:}/{:}_{:}.png'.format(
+                 out_dir, object_name, frame_name.split('/')[-1], object_name)
         if not os.path.exists(fname) or overwrite:
             # Plot image of the target:
             fig = plt.figure()
