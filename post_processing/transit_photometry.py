@@ -178,7 +178,10 @@ def save_photometry(t, rf, rf_err, output_folder, target_name, plot_data=False, 
         data_min = np.percentile(rf-rf_err, 1)
         nom_ymax = 1.05
         data_max = np.percentile(rf+rf_err, 99)
-        plt.ylim(np.max([nom_ymin, data_min]), np.min([nom_ymax, data_max]))
+        try:
+            plt.ylim(np.max([nom_ymin, data_min]), np.min([nom_ymax, data_max]))
+        except:
+            plt.ylim(nom_ymin, nom_ymax)
         x_formatter = ticker.ScalarFormatter(useOffset=False)
         plt.gca().xaxis.set_major_formatter(x_formatter)
         plt.legend()
