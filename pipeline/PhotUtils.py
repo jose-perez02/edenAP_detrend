@@ -767,16 +767,19 @@ def run_astrometry(filename, ra=None, dec=None, radius=None, scale_low= 0.1, sca
     
     exts = get_exts(filename)
     print('\t\t Found {:} extensions'.format(len(exts)))
+
+    true_filename = filename
+    if apply_gaussian_filter:
+        print('\t\t Applying gaussian filter...')
+        filename = filename.replace('.fits', '_gf.fits')
+        with pyfits.open(true_filename) as hdulist:
+            for ext in exts:
+                hdulist[ext].data = gaussian_filter(hdulist[ext].data, 5)
+            # Overwrite argument is helpful if pipeline failed previously
+            hdulist.writeto(filename, overwrite=True)
     
     for ext in exts:
-        print('\t\t Working on extension {:}...'.format(ext))
-        if apply_gaussian_filter:
-           true_filename = filename
-           filename = filename.replace('.fits', '_gf.fits')
-           with pyfits.open(filename) as hdulist:
-               d, h = hdulist[ext].data, hdulist[ext].header
-           pyfits.writeto(filename,gaussian_filter(d,5),header=h)
-           
+        print('\t\t Working on extension {:}...'.format(ext))           
         ext_fname = filename.replace('.fits', '_'+str(ext)+'.wcs.fits')
         if (ra is not None) and (dec is not None) and (radius is not None):
             p = subprocess.Popen(astrometry_directory+'solve-field --overwrite --extension '+ str(ext)+\
@@ -798,27 +801,20 @@ def run_astrometry(filename, ra=None, dec=None, radius=None, scale_low= 0.1, sca
             print (err)
             print ('\n\t Exiting...\n')
             sys.exit()
-        else:
-            if apply_gaussian_filter and os.path.exists(filename.replace('.fits', '.wcs.fits')) and os.path.exists(filename):
-                with pyfits.open(filename) as hdulist:
-                    d, h = hdulist[ext].data, hdulist[ext].header
-                with pyfits.open(filename.replace('.fits', '.wcs.fits')) as hdulist:
-                    dnew, hnew = hdulist[ext].data, hdulist[ext].header
-                with pyfits.open(true_filename) as hdulist:
-                    true_data = hdulist[ext].data
-                pyfits.writeto(true_filename.replace('.fits', '.wcs.fits'),true_data,header=hnew)
     
     # Astrometry.net is run on individual extensions, which are saved above.
     # Combining them back into a single file.
-    with pyfits.open(filename) as hdulist:
+    with pyfits.open(true_filename) as hdulist:
         for ext in exts:
             ext_fname = filename.replace('.fits', '_'+str(ext)+'.wcs.fits')
+            # Try to save new WCS info in original file
             try:
                 with pyfits.open(ext_fname) as hdulist_new:
                     hdulist[ext].header = hdulist_new[1].header
+            # If it doesn't work, copy the WCS info from the last file
             except:
-                data_dir = '/'.join(filename.split('/')[:-1])
-                this_file = filename.split('/')[-1]
+                data_dir = '/'.join(true_filename.split('/')[:-1])
+                this_file = true_filename.split('/')[-1]
                 this_frame = get_trailing_number(this_file.replace('.fits', ''))
                 last_frame = this_frame - 1
                 last_file = str(last_frame).join(this_file.split(str(this_frame)))
@@ -828,10 +824,16 @@ def run_astrometry(filename, ra=None, dec=None, radius=None, scale_low= 0.1, sca
                 print('\t\t Using WCS info from previous frame {:}'.format(last_wcs_filename))
                 with pyfits.open(last_wcs_filename) as hdulist_new:
                     hdulist[ext].header = hdulist_new[ext].header
+            # If it works, remove the single-extension astrometry file
             else:
                 os.remove(ext_fname)
-        hdulist.writeto(filename.replace('.fits', '.wcs.fits'))
-        
+        # Save the original file with the WCS info
+        hdulist.writeto(true_filename.replace('.fits', '.wcs.fits'))
+    
+    # Save space by removing the gaussian filtered image, if any
+    # Second condition is not necessary--just a sanity check
+    if apply_gaussian_filter and '_gf.fits' in filename:
+        os.remove(filename)
                         
 from astropy import wcs
 def SkyToPix(h,ras,decs):

@@ -1,7 +1,7 @@
 FOLDER OPTIONS
 ------------------
 funpack                    = /Users/brackham/utilities/cfitsio/
-astrometry                 = //usr/local/Cellar/astrometry-net/0.73/bin/
+astrometry                 = /usr/local/Cellar/astrometry-net/0.73/bin/
 USER OPTIONS
 ------------------
 SENDEMAIL                  = FALSE
@@ -12,4 +12,4 @@ EMAILRECEIVER              = colleage1@gmail.com,colleage2@mymail.de
 PHOTOMETRY OPTIONS
 ------------------
 ASTROMETRY                 = True
-GFASTROMETRY               = False
+GFASTROMETRY               = True
