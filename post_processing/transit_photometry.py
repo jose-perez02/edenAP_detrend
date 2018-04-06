@@ -160,9 +160,20 @@ def save_photometry(t, rf, rf_err, output_folder, target_name, plot_data=False, 
             fluxes_bins.append(np.median(rf[i:i+n_bin-1]))
             errors_bins.append(np.sqrt(np.sum(rf_err[i:i+n_bin-1]**2))/np.double(n_bin))
         
+        std_dev = np.std(rf)
+        print('Standard deviation:', np.std(rf))
+        mfilt = median_filter(rf)
+        sigma = get_sigma(rf-mfilt)
+        sigma_mag = -2.5*np.log10((1.-sigma)/1.)
+        print('Sigma:', sigma*1e6)
+        print('Sigma (mag):', sigma*1e3)
+        print(-2.5*np.log10((1.-np.std(rf))/1.))
+        print(np.std(rf_mag))
         fig = plt.figure()
         plt.errorbar(t_hours,rf,rf_err,fmt='o',alpha=0.3,label='Data')
         plt.errorbar(np.array(times_bins),np.array(fluxes_bins),np.array(errors_bins),fmt='o',label='Binned data')
+        plt.annotate('$\sigma_{{m}}$ = {:.0f} ppm = {:.1f} mmag'.format(sigma*1e6, sigma_mag*1e3), 
+                     xy=(0.5, 0.05), xycoords='axes fraction', va='bottom', ha='center')
         plt.xlabel('Time from start (hr)')
         plt.ylabel('Relative flux')
         plt.title(title,fontsize='12')
@@ -427,6 +438,12 @@ def plot_cmd(colors, data, idx_target, idx_comparison, post_dir):
     plt.savefig(post_dir+'CMD.pdf')
     plt.close()
 
+def median_filter(arr):
+    median_window = int(np.sqrt(len(arr)))
+    if median_window%2==0:
+        median_window += 1
+    return medfilt(arr, median_window)
+
 ################ INPUT DATA #####################
 
 parser = argparse.ArgumentParser()
@@ -588,9 +605,7 @@ for site in sites:
         print ('\t Estimating optimal aperture...')
         apertures_to_check = range(min_ap,max_ap)
         precision = np.zeros(len(apertures_to_check))
-        median_window = int(np.sqrt(len(times)))
-        if median_window%2==0:
-            median_window = median_window+1
+
         if not os.path.exists(post_dir+'post_processing_outputs/'):
             os.mkdir(post_dir+'post_processing_outputs/')
 
@@ -599,7 +614,7 @@ for site in sites:
             relative_flux,relative_flux_err = super_comparison_detrend(data,idx,idx_comparison,aperture,all_idx = idx_frames)
             save_photometry(times[idx_sort_times],relative_flux[idx_sort_times],relative_flux_err[idx_sort_times],\
                             post_dir+'post_processing_outputs/',target_name = 'photometry_ap'+str(aperture)+'_pix')
-            mfilt = medfilt(relative_flux[idx_sort_times],median_window)
+            mfilt = median_filter(relative_flux[idx_sort_times])
             precision[i] = get_sigma((relative_flux[idx_sort_times] - mfilt)*1e6)
 
         idx_max_prec = np.argmin(precision)
