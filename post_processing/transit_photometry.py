@@ -190,22 +190,22 @@ def save_photometry_hs(data, idx, idx_comparison,
                        idx_sort_times, output_folder, target_name, 
                        band='i', all_idx=None):
     # Define string formatting:
-    header_fmt = '#{0:<29} {1:<16} {2:<8} {3:<7} ' + \
-                 '{4:<8} {5:<7} {6:<8} {7:<7} ' + \
-                 '{8:<13} {9:<13} {10:<13} {11:<13} ' + \
-                 '{12:<13} {13:<19} {14:<19} {15:<21} ' + \
-                 '{16:<16} {17:<16} {18:<16}\n'
+    header_fmt = '#{0:<31} {1:<16} {2:<16} {3:<8} {4:<8} ' + \
+                 '{5:<8} {6:<8} {7:<8} {8:<8} ' + \
+                 '{9:<8} {10:<8} {11:<8} {12:<8} ' + \
+                 '{13:<8} {14:<8} {15:<8} {16:<8} ' + \
+                 '{17:<8} {18:<8} {19:<8}\n'
     header = header_fmt.format(
-             'frame', 'BJD', 'mag1', 'mag1_err', 
+             'frame', 'BJD', 'JD', 'mag1', 'mag1_err', 
              'mag2', 'mag2_err', 'mag3', 'mag3_err', 
-             'rmag1', 'rmag2', 'rmag3', 'centroid_x', 
-             'centroid_y', 'background', 'background_err', 'S', 
-             'ha', 'z', 'JD')
-    s = '{0:<30} {1:<7.8f} {2:<3.4f} {3:<2.4f} ' + \
-        '{4:<3.4f} {5:<2.4f} {6:<3.4f} {7:<2.4f} ' + \
-        '{8:<8.4f} {9:<8.4f} {10:<8.4f} {11:<4.8f} ' + \
-        '{12:<4.8f} {13:<10.8f} {14:<10.8f} {15:<12.8f} ' + \
-        '{16:<9.6f} {17:<9.6f} {18:<7.8f}\n'
+             'rmag1', 'rmag2', 'rmag3', 'cen_x', 
+             'cen_y', 'bg', 'bg_err', 'FWHM', 
+             'HA', 'ZA', 'Z')
+    s = '{0:<32} {1:<16.8f} {2:<16.8f} {3:< 8.4f} {4:<8.4f} ' + \
+        '{5:< 8.4f} {6:<8.4f} {7:< 8.4f} {8:<8.4f} ' + \
+        '{9:< 8.4f} {10:< 8.4f} {11:< 8.4f} {12:<8.3f} ' + \
+        '{13:<8.3f} {14:<8.3f} {15:<8.3f} {16:< 8.3f} ' + \
+        '{17:< 8.2f} {18:<8.2f} {19:<8.2f}\n'
 
     all_ids = []
     all_ras = []
@@ -219,7 +219,7 @@ def save_photometry_hs(data, idx, idx_comparison,
         os.mkdir(hs_folder)
 
     # First, write lightcurve in the HS format for each star. First the comparisons:
-    print ('Saving data for target and ',len(idx_comparison),'comparison stars')
+    print ('Saving data for target and', len(idx_comparison), 'comparison stars')
     for i in idx_comparison+[idx]:
         try:
             d = data['data']['star_'+str(i)]
@@ -234,7 +234,7 @@ def save_photometry_hs(data, idx, idx_comparison,
         all_ids.append(star_name)
         all_ras.append(ra)
         all_decs.append(dec)
-        all_mags.append(np.median(-2.51*np.log10(d['fluxes_'+str(chosen_aperture)+'_pix_ap'][all_idx])))
+        all_mags.append(np.median(-2.512*np.log10(d['fluxes_'+str(chosen_aperture)+'_pix_ap'][all_idx])))
         mag = data['data']['Jmag'][i]
         f = open(str(hs_folder+star_name+'.epdlc'),'w')
         f.write(header)
@@ -244,13 +244,13 @@ def save_photometry_hs(data, idx, idx_comparison,
             if ii != i:
                current_comps.append(ii)
 
-        r_flux1, r_flux_err1 = super_comparison_detrend(data,i,current_comps,chosen_aperture,comp_aperture = chosen_aperture, plot_comps = False,all_idx = all_idx)
-        r_flux2, r_flux_err2 = super_comparison_detrend(data,i,current_comps,min_aperture,comp_aperture = chosen_aperture, plot_comps = False,all_idx = all_idx)
-        r_flux3, r_flux_err3 = super_comparison_detrend(data,i,current_comps,max_aperture,comp_aperture = chosen_aperture, plot_comps = False,all_idx = all_idx)
+        r_flux1, r_flux_err1 = super_comparison_detrend(data, i, current_comps, chosen_aperture, comp_aperture=chosen_aperture, plot_comps=False, all_idx=all_idx)
+        r_flux2, r_flux_err2 = super_comparison_detrend(data, i, current_comps, min_aperture, comp_aperture=chosen_aperture, plot_comps=False, all_idx=all_idx)
+        r_flux3, r_flux_err3 = super_comparison_detrend(data, i, current_comps, max_aperture, comp_aperture=chosen_aperture, plot_comps=False, all_idx=all_idx)
 
-        rmag1 = -2.51*np.log10(r_flux1)
-        rmag2 = -2.51*np.log10(r_flux2)
-        rmag3 = -2.51*np.log10(r_flux3)
+        rmag1 = -2.512*np.log10(r_flux1)
+        rmag2 = -2.512*np.log10(r_flux2)
+        rmag3 = -2.512*np.log10(r_flux3)
 
         idx_not_nan = np.where(~np.isnan(rmag1))[0]
         all_rms.append(np.sqrt(np.var(rmag1[idx_not_nan])))
@@ -258,28 +258,27 @@ def save_photometry_hs(data, idx, idx_comparison,
         for j in idx_sort_times:
             if (not np.isnan(rmag1[j])) and (not np.isnan(rmag2[j])) and (not np.isnan(rmag3[j])):
                 # Get magnitudes and errors:
-                mag1 = -2.51*np.log10(d['fluxes_'+str(chosen_aperture)+'_pix_ap'][all_idx][j])
-                mag1_err = (2.51*d['fluxes_'+str(chosen_aperture)+'_pix_ap_err'][all_idx][j])/(np.log(10.)*d['fluxes_'+str(chosen_aperture)+'_pix_ap'][all_idx][j])
-                mag2 = -2.51*np.log10(d['fluxes_'+str(min_aperture)+'_pix_ap'][all_idx][j])
-                mag2_err = (2.51*(d['fluxes_'+str(min_aperture)+'_pix_ap_err'][all_idx][j]))/(np.log(10.)*d['fluxes_'+str(min_aperture)+'_pix_ap'][all_idx][j])
-                mag3 = -2.51*np.log10(d['fluxes_'+str(max_aperture)+'_pix_ap'][all_idx][j])
-                mag3_err = (2.51*(d['fluxes_'+str(max_aperture)+'_pix_ap_err'][all_idx][j]))/(np.log(10.)*d['fluxes_'+str(max_aperture)+'_pix_ap'][all_idx][j])
+                mag1 = -2.512*np.log10(d['fluxes_'+str(chosen_aperture)+'_pix_ap'][all_idx][j])
+                mag1_err = (2.512*d['fluxes_'+str(chosen_aperture)+'_pix_ap_err'][all_idx][j])/(np.log(10.)*d['fluxes_'+str(chosen_aperture)+'_pix_ap'][all_idx][j])
+                mag2 = -2.512*np.log10(d['fluxes_'+str(min_aperture)+'_pix_ap'][all_idx][j])
+                mag2_err = (2.512*(d['fluxes_'+str(min_aperture)+'_pix_ap_err'][all_idx][j]))/(np.log(10.)*d['fluxes_'+str(min_aperture)+'_pix_ap'][all_idx][j])
+                mag3 = -2.512*np.log10(d['fluxes_'+str(max_aperture)+'_pix_ap'][all_idx][j])
+                mag3_err = (2.512*(d['fluxes_'+str(max_aperture)+'_pix_ap_err'][all_idx][j]))/(np.log(10.)*d['fluxes_'+str(max_aperture)+'_pix_ap'][all_idx][j])
 
                 if d['fwhm'][all_idx][j] != 0.:
-                    S = (2.35 / d['fwhm'][all_idx][j])**2
+                    FWHM = d['fwhm'][all_idx][j]
                 else:
-                    S = -1
-
+                    FWHM = -1
                 lst_deg = CoordsToDecimal(data['LST'][all_idx][j], hours = True)
-                ha = lst_deg-ra
-
-                z = np.arccos(1./float(data['airmasses'][all_idx][j]))*(180./np.pi)
+                HA = lst_deg-ra
+                ZA = np.arccos(1./float(data['airmasses'][all_idx][j]))*(180./np.pi)
+                Z = float(data['airmasses'][all_idx][j])
                 
-                entries = [data['frame_name'][all_idx][j].split('/')[-1], data['BJD_times'][all_idx][j], mag1, mag1_err, 
-                           mag2, mag2_err, mag3, mag3_err, 
+                entries = [data['frame_name'][all_idx][j].split('/')[-1], data['BJD_times'][all_idx][j], data['JD_times'][all_idx][j],
+                           mag1, mag1_err, mag2, mag2_err, mag3, mag3_err, 
                            rmag1[j], rmag2[j], rmag3[j], d['centroids_x'][all_idx][j], 
-                           d['centroids_y'][all_idx][j], d['background'][all_idx][j], d['background_err'][all_idx][j], S, 
-                           ha, z, data['JD_times'][all_idx][j]]
+                           d['centroids_y'][all_idx][j], d['background'][all_idx][j], d['background_err'][all_idx][j], FWHM, 
+                           HA, ZA, Z]
                 f.write(s.format(*entries))
         f.close()
 
