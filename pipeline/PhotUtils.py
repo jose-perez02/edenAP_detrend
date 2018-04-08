@@ -859,10 +859,7 @@ def SkyToPix(h,ras,decs):
     return pix_coords[:,0],pix_coords[:,1]
 
 from photutils import CircularAperture,CircularAnnulus,aperture_photometry
-try:
-    from photutils import daofind
-except:
-    from photutils import DAOStarFinder as daofind
+from photutils import DAOStarFinder as daofind
 from astropy.stats import median_absolute_deviation as mad
 
 global_d = 0
@@ -882,7 +879,6 @@ sigma_gf = 5.*fwhm_factor # 5.
 
 def getAperturePhotometry(d,h,x,y,R,target_names, frame_name = None, out_dir = None, saveplot = False, \
         refine_centroids = False, half_size = 50, GAIN = 1.0, ncores = None):
-
 
     global global_d,global_h,global_x,global_y,global_R,global_target_names,global_frame_name,\
               global_out_dir,global_saveplot,global_refine_centroids,global_half_size,global_GAIN
@@ -942,28 +938,8 @@ def getCentroidsAndFluxes(i):
         x_cen = global_x[i] - x0
         y_cen = global_y[i] - y0
         if global_refine_centroids:
-            # If refine centroids is true, apply a gaussian filter 
-            # first (in case image is defocused):
-            gauss_filtered_subimg = gaussian_filter(subimg,sigma_gf)
-            # Estimate the background in this filtered image:
-            bkg_sigma = 1.48 * mad(gauss_filtered_subimg)
-            # Identify the sources via daofind if everything is ok:
-            try:
-                sources = daofind(gauss_filtered_subimg, fwhm=10.0*fwhm_factor, threshold=10*bkg_sigma)
-                xcents = sources['xcentroid']
-                ycents = sources['ycentroid']
-                dists = np.sqrt( (x_cen-xcents)**2 + (y_cen-ycents)**2 )
-                idx_min = np.where(dists == np.min(dists))[0]
-                if(len(idx_min)>1):
-                    idx_min = idx_min[0]
-                if xcents[idx_min][0] < subimg.shape[0] and xcents[idx_min][0]>0:
-                    x_cen = xcents[idx_min][0]
-                if ycents[idx_min][0] < subimg.shape[1] and ycents[idx_min][0]>0:
-                    y_cen = ycents[idx_min][0]
-            except:
-                '\t Daofind failed. Using astrometric centroids...'
-        #x_cen = x_cen
-        #y_cen = y_cen
+            # Refine the centroids
+            x_cen, y_cen = get_refined_centroids(subimg, x_cen, y_cen)
         x_ref = x0 + x_cen
         y_ref = y0 + y_cen
 
@@ -992,6 +968,82 @@ def getCentroidsAndFluxes(i):
         #if 'target' in global_target_names[i]:
         #    print 'im NOT in for ',global_target_names[i]
         return fluxes_R, fluxes_err_R, global_x[i], global_y[i],0.,0.,0.
+
+import warnings
+def get_refined_centroids(data, x_init, y_init, half_size=15):
+    """
+    Refines the centroids by fitting a centroid to the central portion of an image
+    Method assumes initial astrometry is accurate within the half_size
+    """
+    # Take the central portion of the data (i.e., the subimg)
+    x0 = np.max([0, int(x_init)-half_size])
+    x1 = np.min([int(x_init)+half_size, data.shape[1]])
+    y0 = np.max([0, int(y_init)-half_size])
+    y1 = np.min([int(y_init)+half_size, data.shape[0]])
+    x_refined = x_init - x0
+    y_refined = y_init - y0
+    x_guess = x_init - x0
+    y_guess = y_init - y0
+    cen_data = np.float64(np.copy(data[y0:y1, x0:x1]))
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        sources = daofind(threshold=0, fwhm=2.35*5).find_stars(gaussian_filter(cen_data, 5))
+    xcents = sources['xcentroid']
+    ycents = sources['ycentroid']
+    dists = np.sqrt( (x_refined-xcents)**2 + (y_refined-ycents)**2 )
+    try:
+        idx_min = np.where(dists == np.min(dists))[0]
+        if(len(idx_min)>1):
+            idx_min = idx_min[0]
+        x_guess = xcents[idx_min][0]
+        y_guess = ycents[idx_min][0]
+    except:
+        print('\t\t Daofind failed. Refining pointing with a gaussian...')
+        try:
+            # Robustly fit a gaussian
+            p = fit_gaussian(cen_data)
+            x_guess = p[1]
+            y_guess = p[2]
+        except:
+            print('\t\t No luck. Resorting to astrometric coordinates.')
+    # Don't let the new coordinates stray outside of the sub-image
+    if x_guess < data.shape[0] and x_guess>0:
+        x_refined = x_guess
+    if y_guess < data.shape[1] and y_guess>0:
+        y_refined = y_guess
+    return x_refined+x0, y_refined+y0
+
+def gaussian(height, center_x, center_y, width_x, width_y):
+    """Returns a gaussian function with the given parameters"""
+    width_x = float(width_x)
+    width_y = float(width_y)
+    return lambda x,y: height*np.exp(
+                -(((center_x-x)/width_x)**2+((center_y-y)/width_y)**2)/2)
+
+def moments(data):
+    """Returns (height, x, y, width_x, width_y)
+    the gaussian parameters of a 2D distribution by calculating its
+    moments """
+    total = data.sum()
+    X, Y = np.indices(data.shape)
+    x = (X*data).sum()/total
+    y = (Y*data).sum()/total
+    col = data[:, int(y)]
+    width_x = np.sqrt(np.abs((np.arange(col.size)-y)**2*col).sum()/col.sum())
+    row = data[int(x), :]
+    width_y = np.sqrt(np.abs((np.arange(row.size)-x)**2*row).sum()/row.sum())
+    height = data.max()
+    return height, x, y, width_x, width_y
+
+from scipy import optimize
+def fit_gaussian(data):
+    """Returns (height, x, y, width_x, width_y)
+    the gaussian parameters of a 2D distribution found by a fit"""
+    params = moments(data)
+    errorfunction = lambda p: np.ravel(gaussian(*p)(*np.indices(data.shape)) -
+                                 data)
+    p, success = optimize.leastsq(errorfunction, params)
+    return p
 
 def estimate_fwhm(data,x0,y0):
     """
