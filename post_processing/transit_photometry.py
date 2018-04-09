@@ -286,8 +286,9 @@ def save_photometry_hs(data, idx, idx_comparison,
         f.close()
 
 def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap, 
-                out_dir, frames, idx_frames, half_size=50, overwrite=False):
-    def plot_im(d, cen_x, cen_y, obj_x, obj_y, half_size, frame_name, object_name, overwrite):
+                comp_apertures, out_dir, frames, idx_frames, half_size=50, overwrite=False):
+    def plot_im(d, cen_x, cen_y, obj_x, obj_y, ap, min_ap, max_ap,
+                half_size, frame_name, object_name, overwrite):
         if not os.path.exists(out_dir+'sub_imgs/'+object_name):
             os.makedirs(out_dir+'sub_imgs/'+object_name)
         fname = '{:}/sub_imgs/{:}/{:}_{:}.png'.format(
@@ -308,7 +309,7 @@ def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap,
             plt.plot(x_cen, y_cen, 'wx', markersize=15, lw=2, alpha=0.5)
             circle = plt.Circle((x_cen, y_cen), min_ap, color='black', lw=2, alpha=0.5, fill=False)
             circle2 = plt.Circle((x_cen ,y_cen), max_ap, color='black', lw=2, alpha=0.5, fill=False)
-            circle3 = plt.Circle((x_cen, y_cen), aperture, color='white', lw=2, alpha=0.5, fill=False)
+            circle3 = plt.Circle((x_cen, y_cen), ap, color='white', lw=2, alpha=0.5, fill=False)
             plt.gca().add_artist(circle)
             plt.gca().add_artist(circle2)
             plt.gca().add_artist(circle3)
@@ -361,14 +362,16 @@ def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap,
                     # Plot image of the target:
                     plot_im(d, target_cen_x[0], target_cen_y[0],
                             target_cen_x[i], target_cen_y[i],
+                            aperture, min_ap, max_ap,
                             half_size, frames[i],'target', overwrite)
             # Plot image of the comparisons:
             for j in range(len(idx_comparison)):
                 idx_c = idx_comparison[j]
                 name = 'star_'+str(idx_c)
                 if name in names_ext:
-                    plot_im(d, all_comp_cen_x[j,0], all_comp_cen_y[j,0], 
+                    plot_im(d, np.median(all_comp_cen_x[j,:]), np.median(all_comp_cen_y[j,:]), 
                             all_comp_cen_x[j,i], all_comp_cen_y[j,i], 
+                            comp_apertures[j], min_ap, max_ap,
                             half_size, frames[i],name, overwrite)
 
 def plot_cmd(colors, data, idx_target, idx_comparison, post_dir):
@@ -606,7 +609,8 @@ for site in sites:
     # Saving sub-images
     if plt_images:
         plot_images(data, idx, idx_comparison, chosen_aperture, min_ap, max_ap, 
-                    post_dir, data['frame_name'][idx_frames], idx_frames, overwrite=overwrite)
+                    comp_apertures, post_dir, data['frame_name'][idx_frames], 
+                    idx_frames, overwrite=overwrite)
 
     # Save and plot final LCs:
     print ('\t Getting final relative flux...')
