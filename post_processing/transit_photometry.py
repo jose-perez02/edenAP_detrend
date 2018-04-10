@@ -95,7 +95,6 @@ def check_star(data,idx,min_ap,max_ap,force_aperture,forced_aperture, max_comp_d
 
 def super_comparison_detrend(data, idx, idx_comparison, chosen_aperture, 
                              comp_apertures=None, plot_comps=False, all_idx=None):
-
     try:
         n_comps = len(idx_comparison)
     except TypeError:
@@ -253,6 +252,10 @@ def save_photometry_hs(data, idx, idx_comparison,
         for ii in idx_comparison:
             if ii != i:
                current_comps.append(ii)
+        if len(current_comps)==0:
+            current_comps = idx_all_comps_sorted[0:10]
+            comp_apertures = comp_apertures*len(current_comps)
+
         r_flux1, r_flux_err1 = super_comparison_detrend(data, i, current_comps, chosen_aperture, comp_apertures=comp_apertures, plot_comps=False, all_idx=all_idx)
         r_flux2, r_flux_err2 = super_comparison_detrend(data, i, current_comps, min_aperture, comp_apertures=comp_apertures, plot_comps=False, all_idx=all_idx)
         r_flux3, r_flux_err3 = super_comparison_detrend(data, i, current_comps, max_aperture, comp_apertures=comp_apertures, plot_comps=False, all_idx=all_idx)
@@ -349,8 +352,8 @@ def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap,
             comp_cen_x = data['data']['target_star_'+str(idx_c)]['centroids_x'][idx_frames]
             comp_cen_y = data['data']['target_star_'+str(idx_c)]['centroids_y'][idx_frames]
         if i==0:
-            all_comp_cen_x = comp_cen_x
-            all_comp_cen_y = comp_cen_y
+            all_comp_cen_x = np.atleast_2d(comp_cen_x)
+            all_comp_cen_y = np.atleast_2d(comp_cen_y)
         else:
             all_comp_cen_x = np.vstack((all_comp_cen_x,comp_cen_x)) 
             all_comp_cen_y = np.vstack((all_comp_cen_y,comp_cen_y))
@@ -417,7 +420,7 @@ parser.add_argument('-dome',default='')
 parser.add_argument('-minap',default = 5)
 parser.add_argument('-maxap',default = 25)
 parser.add_argument('-apstep',default = 1)
-parser.add_argument('-ncomp',default = 10)
+parser.add_argument('-ncomp',default = 0)
 parser.add_argument('-forced_aperture',default = 15)
 parser.add_argument('--force_aperture', dest='force_aperture', action='store_true')
 parser.set_defaults(force_aperture=False)
@@ -590,9 +593,22 @@ for site in sites:
              prec = np.inf
         comp_precisions.append(prec)
     idx_all_comps_sorted = list(np.array(idx_all_comps)[np.argsort(comp_precisions)])
+
+    # Selecting optimal number of comparisons, if not pre-set with flag
+    if ncomp==0:
+        best_precision = np.inf
+        for i in range(len(idx_all_comps_sorted)):
+            # Check the target
+            relative_flux, relative_flux_err = super_comparison_detrend(data, idx, idx_all_comps_sorted[0:i+1], aperture, all_idx = idx_frames)
+            mfilt = median_filter(relative_flux[idx_sort_times])
+            prec = get_sigma((relative_flux[idx_sort_times] - mfilt)*1e6)
+            if prec < best_precision:
+                ncomp = i+1
+                best_precision = prec
+
     idx_comparison = idx_all_comps_sorted[0:ncomp]
-    print('\t {:} comparison stars available; selected the {:} best: {:}'.format(
-              len(idx_all_comps_sorted), len(idx_comparison), idx_comparison))
+    print('\t {:} comparison stars available'.format(len(idx_all_comps_sorted)))
+    print('\t Selected the {:} best: {:}'.format(len(idx_comparison), idx_comparison))
 
     # Plot the color-magnitude diagram
     plot_cmd(colors, data, idx, idx_comparison, post_dir)
@@ -601,9 +617,10 @@ for site in sites:
     # Check the comparisons, and optionally select their apertures
     if not os.path.exists(post_dir+'comp_light_curves/'):
         os.mkdir(post_dir+'comp_light_curves/')
-    idx_comps = np.array(idx_comparison)
     for i_c in idx_comparison:
         idx_c = np.array(idx_comparison)[np.where(idx_comparison!=i_c)]
+        if len(idx_c)==0:
+            idx_c = idx_all_comps_sorted[0:10]
         if optimize_apertures:
             precision = np.zeros(len(apertures_to_check))                
             for i_ap in range(len(apertures_to_check)):
