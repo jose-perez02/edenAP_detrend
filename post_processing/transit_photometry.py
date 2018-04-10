@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 
 from scipy.signal import medfilt
+from scipy.stats import linregress
 from matplotlib import ticker
 
 def CoordsToDecimal(coords, hours=False):
@@ -44,19 +45,19 @@ def CoordsToDecimal(coords, hours=False):
     return ras,decs
 
 def get_super_comp(all_comp_fluxes, all_comp_fluxes_err):
-   super_comp = np.zeros(all_comp_fluxes.shape[1])
-   super_comp_err = np.zeros(all_comp_fluxes.shape[1])
-   for i in range(all_comp_fluxes.shape[1]):
-       data = all_comp_fluxes[:,i] 
-       data_err = all_comp_fluxes_err[:,i]
-       med_data = np.median(data)
-       sigma = get_sigma(data)
+    super_comp = np.zeros(all_comp_fluxes.shape[1])
+    super_comp_err = np.zeros(all_comp_fluxes.shape[1])
+    for i in range(all_comp_fluxes.shape[1]):
+        data = all_comp_fluxes[:,i] 
+        data_err = all_comp_fluxes_err[:,i]
+        med_data = np.median(data)
+        sigma = get_sigma(data)
        
-       idx = np.where((data<=med_data+5*sigma)&(data>=med_data-5*sigma)&\
-                      (~np.isnan(data))&(~np.isnan(data_err)))[0]
-       super_comp[i] = np.median(data[idx])
-       super_comp_err[i] = np.sqrt(np.sum(data_err[idx]**2)/np.double(len(data_err[idx])))
-   return super_comp,super_comp_err
+        idx = np.where((data<=med_data+5*sigma)&(data>=med_data-5*sigma)&\
+                       (~np.isnan(data))&(~np.isnan(data_err)))[0]
+        super_comp[i] = np.median(data[idx])
+        super_comp_err[i] = np.sqrt(np.sum(data_err[idx]**2)/np.double(len(data_err[idx])))
+    return super_comp,super_comp_err
 
 def get_sigma(data):
     mad = np.median(np.abs(data-np.median(data)))
@@ -94,7 +95,8 @@ def check_star(data,idx,min_ap,max_ap,force_aperture,forced_aperture, max_comp_d
     return True
 
 def super_comparison_detrend(data, idx, idx_comparison, chosen_aperture, 
-                             comp_apertures=None, plot_comps=False, all_idx=None):
+                             comp_apertures=None, plot_comps=False, all_idx=None,
+                             supercomp=False):
     try:
         n_comps = len(idx_comparison)
     except TypeError:
@@ -139,9 +141,12 @@ def super_comparison_detrend(data, idx, idx_comparison, chosen_aperture,
     relative_flux_err = np.sqrt( (super_comp_err*target_flux/super_comp**2)**2 + \
                                  (target_flux_err/super_comp)**2)
     med_rel_flux = np.median(relative_flux)
+    if supercomp:
+        return relative_flux/med_rel_flux,relative_flux_err/med_rel_flux, super_comp, super_comp_err
     return relative_flux/med_rel_flux,relative_flux_err/med_rel_flux
 
-def save_photometry(t, rf, rf_err, output_folder, target_name, plot_data=False, title=''):
+def save_photometry(t, rf, rf_err, output_folder, target_name, 
+                    plot_data=False, title='', units='Relative Flux'):
     rf_mag = -2.5*np.log10(rf)
     rf_mag_err = rf_err*2.5/(np.log(10)*rf)
     f = open(output_folder + target_name + '.dat','w')
@@ -168,7 +173,7 @@ def save_photometry(t, rf, rf_err, output_folder, target_name, plot_data=False, 
         
         # Calculate standard deviation of median filtered data
         mfilt = median_filter(rf)
-        sigma = get_sigma(rf-mfilt)
+        sigma = get_sigma(rf-mfilt) / np.median(rf)
         sigma_mag = -2.5*np.log10((1.-sigma)/1.)
         # Make plot
         fig = plt.figure()
@@ -177,7 +182,7 @@ def save_photometry(t, rf, rf_err, output_folder, target_name, plot_data=False, 
         plt.annotate('$\sigma_{{m}}$ = {:.0f} ppm = {:.1f} mmag'.format(sigma*1e6, sigma_mag*1e3), 
                      xy=(0.5, 0.05), xycoords='axes fraction', va='bottom', ha='center')
         plt.xlabel('Time from start (hr)')
-        plt.ylabel('Relative flux')
+        plt.ylabel(units)
         plt.title(title,fontsize='12')
         plt.xlim(-0.05*np.ptp(t_hours), 1.05*np.ptp(t_hours))
         nom_ymin = 0.95
@@ -579,20 +584,17 @@ for site in sites:
     # Now determine the n best comparisons using the target aperture:
     idx_comparison = []
     comp_apertures = []
-    comp_precisions = []
+    comp_correlations = []
     target_flux = data['data']['target_star_'+str(idx)]['fluxes_'+str(chosen_aperture)+'_pix_ap'][idx_frames]
     target_flux_err = data['data']['target_star_'+str(idx)]['fluxes_'+str(chosen_aperture)+'_pix_ap_err'][idx_frames]
     exptimes = data['exptimes']
     for idx_c in idx_all_comps:
-        # Check the target
-        relative_flux, relative_flux_err = super_comparison_detrend(data, idx, idx_c, aperture, all_idx = idx_frames)
-        mfilt = median_filter(relative_flux[idx_sort_times])
-        prec = get_sigma((relative_flux[idx_sort_times] - mfilt)*1e6)
-        # Don't use stars that increase the standard deviation of the light curve (e.g., variable stars):
-        if get_sigma((target_flux/exptimes)/np.median(target_flux/exptimes)) < get_sigma(relative_flux/np.median(relative_flux)):
-             prec = np.inf
-        comp_precisions.append(prec)
-    idx_all_comps_sorted = list(np.array(idx_all_comps)[np.argsort(comp_precisions)])
+        # Check the correlation between the target and comparison flux
+        comp_flux = (data['data']['star_'+str(idx_c)]['fluxes_'+str(chosen_aperture)+'_pix_ap']/exptimes)[idx_frames]
+        comp_flux_err = (data['data']['star_'+str(idx_c)]['fluxes_'+str(chosen_aperture)+'_pix_ap_err']/exptimes)[idx_frames]
+        result = linregress(target_flux, comp_flux)
+        comp_correlations.append(result.rvalue**2)
+    idx_all_comps_sorted = list(np.array(idx_all_comps)[np.argsort(comp_correlations)[::-1]])
 
     # Selecting optimal number of comparisons, if not pre-set with flag
     if ncomp==0:
@@ -615,6 +617,8 @@ for site in sites:
     
     comp_apertures = []
     # Check the comparisons, and optionally select their apertures
+    if not os.path.exists(post_dir+'raw_light_curves/'):
+        os.mkdir(post_dir+'raw_light_curves/')
     if not os.path.exists(post_dir+'comp_light_curves/'):
         os.mkdir(post_dir+'comp_light_curves/')
     for i_c in idx_comparison:
@@ -634,11 +638,33 @@ for site in sites:
             print ('\t >> Precision achieved: {:.0f} ppm'.format(precision[idx_max_prec]))
         else:
             the_aperture = chosen_aperture
+        
+        # Save the raw and detrended light curves
+        exptimes = data['exptimes']
+        comp_flux = (data['data']['star_'+str(i_c)]['fluxes_'+str(the_aperture)+'_pix_ap']/exptimes)[idx_frames]
+        comp_flux_err = (data['data']['star_'+str(i_c)]['fluxes_'+str(the_aperture)+'_pix_ap_err']/exptimes)[idx_frames]
+        save_photometry(times[idx_sort_times], comp_flux[idx_sort_times], comp_flux_err[idx_sort_times],
+            post_dir+'raw_light_curves/', target_name='star_{:}_photometry_ap{:}_pix'.format(i_c, the_aperture),
+            plot_data=True, units='Counts')
         rf_comp, rf_comp_err = super_comparison_detrend(data, i_c, idx_c, the_aperture, all_idx = idx_frames)
         save_photometry(times[idx_sort_times], rf_comp[idx_sort_times], rf_comp_err[idx_sort_times],
             post_dir+'comp_light_curves/', target_name='star_{:}_photometry_ap{:}_pix'.format(i_c, the_aperture),
-            plot_data=True)
+            plot_data=True, units='Counts')
         comp_apertures.append(the_aperture)
+
+    # Save the raw light curves for the target as well
+    target_flux = (data['data']['target_star_'+str(idx)]['fluxes_'+str(chosen_aperture)+'_pix_ap']/exptimes)[idx_frames]
+    target_flux_err = (data['data']['target_star_'+str(idx)]['fluxes_'+str(chosen_aperture)+'_pix_ap_err']/exptimes)[idx_frames]
+    save_photometry(times[idx_sort_times], target_flux[idx_sort_times], target_flux_err[idx_sort_times],
+        post_dir+'raw_light_curves/', target_name='target_photometry_ap{:}_pix'.format(chosen_aperture),
+        plot_data=True)
+    # And save the super comparison
+    _, _, super_comp, super_comp_err = super_comparison_detrend(data, idx, idx_all_comps_sorted[0:ncomp],
+                                                                aperture, comp_apertures=comp_apertures,
+                                                                all_idx=idx_frames, supercomp=True)
+    save_photometry(times[idx_sort_times], super_comp[idx_sort_times], super_comp_err[idx_sort_times],
+        post_dir+'raw_light_curves/', target_name='super_comp_photometry_ap{:}_pix'.format(chosen_aperture),
+        plot_data=True)
 
     # Saving sub-images
     if plt_images:
