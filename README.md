@@ -10,15 +10,15 @@ DEPENDENCIES
 
 This code makes use of the following python libraries:
 
-    + Numpy.
-    + Scipy.
-    + Pyfits.
-    + Beautiful Soup (https://www.crummy.com/software/BeautifulSoup/bs4/doc/).
-    + Astropy (http://www.astropy.org/).
-    + Photutils (http://photutils.readthedocs.io/).
+    + Numpy
+    + Scipy
+    + Pyfits
+    + Beautiful Soup (https://www.crummy.com/software/BeautifulSoup/bs4/doc/)
+    + Astropy (http://www.astropy.org/)
+    + Photutils (http://photutils.readthedocs.io/)
     + pyephem (https://pypi.python.org/pypi/pyephem/)
-    + Astroquery (https://astroquery.readthedocs.io/en/latest/).
-    + funpack (https://heasarc.gsfc.nasa.gov/fitsio/fpack/).
+    + Astroquery (https://astroquery.readthedocs.io/en/latest/)
+    + funpack (https://heasarc.gsfc.nasa.gov/fitsio/fpack/)
 
 All of them are open source and can be easily installed in any machine. 
 
@@ -28,10 +28,22 @@ which can be downloaded from here:
 
                 http://astrometry.net/use.html. 
 
-Instructions useful for Mac users on how to install this package might be 
-found here: 
+Installing astronometry.net on a mac can be done by following these steps:
 
-    http://www2.lowell.edu/users/massey/Macsoftware.html#Astrom. 
+1. Install homebrew:
+
+https://brew.sh/
+
+2. Tap `brewsci` and install `astrometry-net`:
+
+```brew tap brewsci/homebrew-science```
+```brew install homebrew/science/astrometry-net```
+
+3. Grab the 4100 and 4200 index files from
+
+http://broiler.astrometry.net/~dstn
+
+4.  Make sure the `astrometry.net` package knows where to find the index files.
 
 INSTALLATION & SETUP
 --------------------
@@ -86,11 +98,11 @@ on having internet connection:
 
 2. From terminal, go to the pipeline folder (`cd pipeline`) and run:
 
-       python automatic_lcogt.py -project NAMEOFTHEPROJECT -ndays N
+       python automatic_photometry_eden.py -telescop NAMEOFTHETELESCOPE -ndays N
 
-   Where `NAMEOFTHEPROJECT` corresponds to the project in the userdata.dat file 
+   Where `NAMEOFTHETELESCOPE` corresponds to the telescope in the userdata.dat file 
    that you filled in in step 1. This will run the pipeline and save the products 
-   under a `red` folder, inside the project's folder (e.g., if the project was 
+   under a `red` folder, inside the telescope's folder (e.g., if the telescope was 
    `VATT`, products will be saved in `/data/VATT/red`). 
    The pipeline will generate photometry for all the datasets in the folder for which no 
    photometry is yet available that have dates (which is measured from the folder name, 
@@ -123,8 +135,8 @@ pixels to 50 pixels, and the `post_processing/transit_photometry.py` code search
 with the smallest RMS.
 
 It is important to note that the differential photometry performed by the code is based on first 
-combining the 10 comparison stars closer in brightness and color to the target, and then generating 
-a "super comparison" star with those, which is finally divided to the target star. This is done 
+combining the set of comparison stars light curves most similar to the target's, and then generating 
+a "super comparison" star with those, which is finally divided into the target star light curve. This is done 
 in order to not "touch" the target star, so the target could have systematic effects/trends arising 
 from airmass, variability, etc. In general these are useful, because one can later detrend the 
 resulting lightcurve with other methods. 
@@ -138,8 +150,7 @@ each target. Inside, you will find:
  1. The `photometry.pkl` file, which contains all the aperture photometry for all the stars in the field 
     for all the apertures (5 to 50 pixels).
 
- 2. Folders named `sinistro_ap`, where `ap` is one of the apertures in pixels. The folder `sinistro` (without 
-    aperture number) is the folder that contains the optimal aperture (see previous section).
+ 2. The `post_processing` folder.
 
 Each of the `sinistro_ap` folders contain two `.dat` files: the one with the `norm_flux.dat` sufix contains the 
 times (in BJD), relative flux and error on the relative flux of the (corrected by the comparison stars) target 
@@ -147,10 +158,11 @@ star, while the other `.dat` file contains the same in differential magnitudes.
 
 The folder `LC` is very important, as it contains the differential magnitude of the target and the comparison 
 stars in the `.epdlc` format, which is useful if you want to detrend your data or play with other ways of combining 
-the extracted fluxes of the target and its comparison stars. This format contains lots of information, but the most 
-important are the following columns: (0) file name, (1) times in BJD, (2) relative magnitude of the target, (3) error 
-on the magnitude, (17) Centroid (X-axis) on the image, (18) Centroid (Y-axis) on the image, (19) Background flux, (20) 
-Error on background flux, (21) (2.35/FWHM)^2 (not useful for defocused images), (22) Hour angle and (23) Zenith angle.
+the extracted fluxes of the target and its comparison stars. This format contains lots of information, including: 
+file name, times in BJD, relative magnitude of the target, error on the magnitude, x and y centroids, background flux, 
+error on the background flux, full-width half-maximum, hour angle, and zenith angle.
+
+The `raw_light_curves` folder contains the original extracted light curves for the target and comparison stars.
 
 The `post_processing_outputs` folder contains the photometry for all the apertures in `.dat` files, similar to the 
 `.dat` files inside the `sinistro_ap` folders. 
@@ -164,7 +176,7 @@ POST-PROCESSING USAGE
 In the eventuality in which the post-processing fails, you can do it yourself inside the `post_processing` folder. 
 A common usage is:
 
-           python transit_photometry.py -project NAMEOFTHEPROJECT -datafolder 20180128 -target_name TARGETNAME -ra "14:00:00" -dec " -60:00:00" --plt_images
+           python transit_photometry.py -telescope NAMEOFTHETELESCOPE -datafolder 20180128 -target_name TARGETNAME -ra "14:00:00" -dec " -60:00:00" --plt_images
 
-This will save the photometry in the `red/20180128` folder inside the project `NAMEOFTHEPROJECT` for the target 
+This will save the photometry in the `red/20180128` folder inside the telescope folder `NAMEOFTHETELESCOPE` for the target 
 `TARGETNAME`.
