@@ -138,8 +138,8 @@ def super_comparison_detrend(data, idx, idx_comparison, chosen_aperture,
         plt.plot(super_comp,'r-')
         plt.show()
     relative_flux = target_flux/super_comp
-    relative_flux_err = np.sqrt( (super_comp_err*target_flux/super_comp**2)**2 + \
-                                 (target_flux_err/super_comp)**2)
+    relative_flux_err = relative_flux * np.sqrt((target_flux_err/target_flux)**2 + \
+                                                (super_comp_err/super_comp)**2)
     med_rel_flux = np.median(relative_flux)
     if supercomp:
         return relative_flux/med_rel_flux,relative_flux_err/med_rel_flux, super_comp, super_comp_err
