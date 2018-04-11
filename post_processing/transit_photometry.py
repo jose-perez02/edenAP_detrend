@@ -596,9 +596,6 @@ for site in sites:
         result = linregress(target_flux, comp_flux)
         comp_correlations.append(result.rvalue**2)
     idx_all_comps_sorted = list(np.array(idx_all_comps)[np.argsort(comp_correlations)[::-1]])
-    print(comp_correlations)
-#     print(np.argsort(comp_correlations)[::-1])
-    print(np.array(comp_correlations)[np.argsort(comp_correlations)[::-1]])
 
     # Selecting optimal number of comparisons, if not pre-set with flag
     if ncomp==0:
@@ -662,7 +659,7 @@ for site in sites:
     target_flux_err = (data['data']['target_star_'+str(idx)]['fluxes_'+str(chosen_aperture)+'_pix_ap_err']/exptimes)[idx_frames]
     save_photometry(times[idx_sort_times], target_flux[idx_sort_times], target_flux_err[idx_sort_times],
         post_dir+'raw_light_curves/', target_name='target_photometry_ap{:}_pix'.format(chosen_aperture),
-        plot_data=True)
+        plot_data=True, units='Counts')
     # And save the super comparison
     _, _, super_comp, super_comp_err = super_comparison_detrend(data, idx, idx_all_comps_sorted[0:ncomp],
                                                                 aperture, comp_apertures=comp_apertures,
