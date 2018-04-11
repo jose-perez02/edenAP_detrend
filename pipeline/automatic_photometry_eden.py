@@ -376,11 +376,11 @@ for i in range(len(dates_raw)):
                 if ap == 'opt':
                     code = 'python transit_photometry.py -telescope '+telescope+' -datafolder '+\
                            dates_raw[i]+' -target_name '+target_name+' -band "'+band+\
-                           '" -ra "'+RA+'" -dec "'+DEC+'" -ncomp 10 --plt_images --autosaveLC'
+                           '" -ra "'+RA+'" -dec "'+DEC+'" --plt_images --autosaveLC'
                 else:
                     code = 'python transit_photometry.py -telescope '+telescope+' -datafolder '+\
                            dates_raw[i]+' -target_name '+target_name+' -band "'+band+\
-                           '" -ra "'+RA+'" -dec "'+DEC+'" -ncomp 10 --plt_images --force_aperture -forced_aperture '+ap+' --autosaveLC'
+                           '" -ra "'+RA+'" -dec "'+DEC+'" --plt_images --force_aperture -forced_aperture '+ap+' --autosaveLC'
                 print( code )
                 p = subprocess.Popen(code,stdout = subprocess.PIPE, \
                                      stderr = subprocess.PIPE,shell = True)
