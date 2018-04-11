@@ -186,13 +186,14 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
         plt.title(title,fontsize='12')
         plt.xlim(-0.05*np.ptp(t_hours), 1.05*np.ptp(t_hours))
         nom_ymin = 0.95
-        data_min = np.percentile(rf-rf_err, 2.5)
+        data_min = np.median(rf-rf_err) - 5*get_sigma(rf)
         nom_ymax = 1.05
-        data_max = np.percentile(rf+rf_err, 97.5)
-#         try:
-#             plt.ylim(np.min([nom_ymin, data_min]), np.max([nom_ymax, data_max]))
-#         except:
-#             plt.ylim(nom_ymin, nom_ymax)
+        data_max = np.median(rf+rf_err) + 5*get_sigma(rf)
+        try:
+            plt.ylim(data_min, data_max)
+        except:
+            plt.ylim(nom_ymin, nom_ymax)
+        plt.ylim(data_min, data_max)
         x_formatter = ticker.ScalarFormatter(useOffset=False)
         plt.gca().xaxis.set_major_formatter(x_formatter)
         plt.legend()
@@ -595,6 +596,9 @@ for site in sites:
         result = linregress(target_flux, comp_flux)
         comp_correlations.append(result.rvalue**2)
     idx_all_comps_sorted = list(np.array(idx_all_comps)[np.argsort(comp_correlations)[::-1]])
+    print(comp_correlations)
+#     print(np.argsort(comp_correlations)[::-1])
+    print(np.array(comp_correlations)[np.argsort(comp_correlations)[::-1]])
 
     # Selecting optimal number of comparisons, if not pre-set with flag
     if ncomp==0:
@@ -603,7 +607,8 @@ for site in sites:
             # Check the target
             relative_flux, relative_flux_err = super_comparison_detrend(data, idx, idx_all_comps_sorted[0:i+1], aperture, all_idx = idx_frames)
             mfilt = median_filter(relative_flux[idx_sort_times])
-            prec = get_sigma((relative_flux[idx_sort_times] - mfilt)*1e6)
+#             prec = get_sigma((relative_flux[idx_sort_times] - mfilt)*1e6)
+            prec = np.median(relative_flux_err)*1e6
             if prec < best_precision:
                 ncomp = i+1
                 best_precision = prec
@@ -679,10 +684,9 @@ for site in sites:
                    comp_apertures=comp_apertures, 
                    plot_comps=all_plots, all_idx=idx_frames)
 
-    median_flux = np.max([np.median(relative_flux[idx_sort_times][0:10]),np.median(relative_flux[idx_sort_times][-10:])])
     print ('\t Saving...')
-    save_photometry(times[idx_sort_times],relative_flux[idx_sort_times]/median_flux,relative_flux_err[idx_sort_times]/median_flux,\
-                    post_dir,target_name = target_name,plot_data = True, title = target_name + ' on ' + foldername.split('/')[-3]+' at '+site)
+    save_photometry(times[idx_sort_times], relative_flux[idx_sort_times], relative_flux_err[idx_sort_times], \
+                    post_dir, target_name=target_name, plot_data=True, title=target_name+' on '+foldername.split('/')[-3]+' at '+site)
 
     save_photometry_hs(data, idx, idx_comparison, chosen_aperture, min_ap, max_ap, 
                        comp_apertures, idx_sort_times, post_dir, target_name, band=band, all_idx=idx_frames)
