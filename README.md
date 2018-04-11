@@ -30,18 +30,14 @@ which can be downloaded from here:
 
 Installing astronometry.net on a mac can be done by following these steps:
 
-1. Install homebrew:
-
-https://brew.sh/
+1. Install homebrew by following instructions at: https://brew.sh/
 
 2. Tap `brewsci` and install `astrometry-net`:
 
 ```brew tap brewsci/homebrew-science```
 ```brew install homebrew/science/astrometry-net```
 
-3. Grab the 4100 and 4200 index files from
-
-http://broiler.astrometry.net/~dstn
+3. Grab the 4100 and 4200 index files from http://broiler.astrometry.net/~dstn
 
 4.  Make sure the `astrometry.net` package knows where to find the index files.
 
@@ -180,3 +176,12 @@ A common usage is:
 
 This will save the photometry in the `red/20180128` folder inside the telescope folder `NAMEOFTHETELESCOPE` for the target 
 `TARGETNAME`.
+
+To Do
+-----
+
+1. Ensure bias subtraction, flat-fielding, bad pixel correction, and cosmic ray corrections are applied in pre-processing calibration pipeline
+
+2. Standardize file paths to match the format the team agreed on
+
+3. Adapt to use with: Schulman, Bok, and Kuiper telescopes
