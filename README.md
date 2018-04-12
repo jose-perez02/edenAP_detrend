@@ -35,7 +35,7 @@ Installing astronometry.net on a mac can be done by following these steps:
 2. Tap `brewsci` and install `astrometry-net`:
 
 ```brew tap brewsci/homebrew-science```
-```brew install homebrew/science/astrometry-net```
+```brew install brewsci/homebrew-science/astrometry-net```
 
 3. Grab the 4100 and 4200 index files from http://broiler.astrometry.net/~dstn
 
