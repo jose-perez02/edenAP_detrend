@@ -13,3 +13,4 @@ PHOTOMETRY OPTIONS
 ------------------
 ASTROMETRY                 = True
 GFASTROMETRY               = True
+REF_CENTERS                = True

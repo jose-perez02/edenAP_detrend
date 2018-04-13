@@ -44,6 +44,7 @@ def read_setupfile():
     emailreceiver = ['']
     ASTROMETRY = False
     GF_ASTROMETRY = False
+    REF_CENTERS = False
     done = False
     while True:
         line = fin.readline()
@@ -89,13 +90,16 @@ def read_setupfile():
                     if opt == 'GFASTROMETRY':
                         if res.lower() == 'true':
                             GF_ASTROMETRY = True
+                    if opt == 'REF_CENTERS':
+                        if res.lower() == 'true':
+                            REF_CENTERS = True
                 if line == '':
                     done = True
                     break
         if done:
             break
     return fpack_folder,astrometry_folder,SEND_EMAIL,emailsender,emailsender_pwd,\
-           emailreceiver,ASTROMETRY,GF_ASTROMETRY
+           emailreceiver,ASTROMETRY,GF_ASTROMETRY,REF_CENTERS
 
 class Bimail:
     def __init__(self,subject,recipients):
@@ -289,7 +293,7 @@ while True:
 data_folder = cf
 
 fpack_folder,astrometry_folder,SEND_EMAIL,emailsender,emailsender_pwd,\
-emailreceiver,ASTROMETRY,GF_ASTROMETRY = read_setupfile()
+emailreceiver,ASTROMETRY,GF_ASTROMETRY,REF_CENTERS = read_setupfile()
 
 emails_to_send = emailreceiver #['nestor.espinozap@gmail.com','daniel.bayliss01@gmail.com','andres.jordan@gmail.com']
 
@@ -304,7 +308,7 @@ dates_red = len(folders_red)*[[]]
 for i in range(len(folders_red)):
     dates_red[i] = folders_red[i].split('/')[-1]
 
-# Run the get_photometry_lcogt code for all the raw folders in case new data from past nights was 
+# Run the get_photometry_eden code for all the raw folders in case new data from past nights was 
 # reduced by LCOGT today. If no new data, nothing will happen (i.e., the code does nothing):
 today_jd = sum(jdcal.gcal2jd(str(datetime.today().year), str(datetime.today().month), str(datetime.today().day)))
 for i in range(len(dates_raw)):
@@ -328,10 +332,12 @@ for i in range(len(dates_raw)):
         print( '>> Reducing data for '+dates_raw[i]+' night. Reducing...' )
         optional_options = ''
         if ASTROMETRY:
-            optional_options = ' --get_astrometry'
+            optional_options += ' --get_astrometry'
         if GF_ASTROMETRY:
-            optional_options = optional_options+' --gf_opt_astrometry'
-            
+            optional_options += ' --gf_opt_astrometry'
+        if REF_CENTERS:
+            optional_options += ' --ref_centers'
+        
         os.system('python get_photometry_eden.py -telescope '+telescope+' -datafolder '+dates_raw[i]+optional_options)
         
 #         continue # Post-processing algorithm below needs some work

@@ -47,7 +47,7 @@ parser.set_defaults(gf_opt_astrometry=False)
 
 # Refine the centroids of each target?
 parser.add_argument('--ref_centers', dest='ref_centers', action='store_true')
-parser.set_defaults(ref_centers=True)
+parser.set_defaults(ref_centers=False)
 
 args = parser.parse_args()
 
@@ -81,10 +81,8 @@ max_aperture = int(args.maxap)
 aperture_step = int(args.apstep)
 
 get_astrometry = args.get_astrometry
-#print get_astrometry
-ref_centers = args.ref_centers
-#print ref_centers
 gf_opt_astrometry = args.gf_opt_astrometry
+ref_centers = args.ref_centers
 
 ###################################################################
 print ('\n')
