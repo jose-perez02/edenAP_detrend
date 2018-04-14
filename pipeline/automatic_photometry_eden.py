@@ -290,7 +290,7 @@ while True:
         print( '\t > Telescope '+telescope+' is not on the list of saved telescopes. ' )
         print( '\t   Please associate it on the userdata.dat file.' )
 
-data_folder = cf
+data_folder = os.path.expanduser(cf)
 
 fpack_folder,astrometry_folder,SEND_EMAIL,emailsender,emailsender_pwd,\
 emailreceiver,ASTROMETRY,GF_ASTROMETRY,REF_CENTERS = read_setupfile()

@@ -72,8 +72,8 @@ while True:
         print( '\t > Telescope '+telescope+' is not on the list of saved telescopes. ' )
         print( '\t   Please associate it on the userdata.dat file.' )
 
-out_raw_folder = cf + 'raw/'
-out_red_folder = cf + 'red/'
+out_raw_folder = os.path.expanduser(cf) + 'raw/'
+out_red_folder = os.path.expanduser(cf) + 'red/'
 
 # Define apertures for aperture photometry:
 min_aperture = int(args.minap)
