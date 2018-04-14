@@ -471,6 +471,8 @@ while True:
         print ('\t > Telescope '+telescope+' is not on the list of saved telescopes. ')
         print ('\t   Please associate it on the userdata.dat file.')
 
+cf = os.path.expanduser(cf)
+
 if telescope == 'SWOPE':
     foldername = cf + telescope+'/red/'+date+'/'+target_name+'/'
 elif telescope == 'CHAT':
