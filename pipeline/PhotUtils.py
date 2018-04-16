@@ -1402,7 +1402,6 @@ def get_general_coords(target,date):
         dt = dateutil.parser.parse(s)
         data_jd = sum(jdcal.gcal2jd(dt.year, dt.month, dt.day))
         deltat = (data_jd-2451544.5)/365.25
-        print('deltat', deltat)
         # Calculate total PM:
         pmra = np.double(pmra)*deltat
         pmdec = np.double(pmdec)*deltat
