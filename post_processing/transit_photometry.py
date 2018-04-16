@@ -656,7 +656,7 @@ for site in sites:
         plot_data=True, units='Counts')
     # And save the super comparison
     _, _, super_comp, super_comp_err = super_comparison_detrend(data, idx, idx_all_comps_sorted[0:ncomp],
-                                                                aperture, comp_apertures=comp_apertures,
+                                                                chosen_aperture, comp_apertures=comp_apertures,
                                                                 all_idx=idx_frames, supercomp=True)
     save_photometry(times[idx_sort_times], super_comp[idx_sort_times], super_comp_err[idx_sort_times],
         post_dir+'raw_light_curves/', target_name='super_comp_photometry_ap{:}_pix'.format(chosen_aperture),
