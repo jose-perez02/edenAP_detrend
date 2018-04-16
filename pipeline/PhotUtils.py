@@ -439,6 +439,21 @@ def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filte
         t_scale_high = 0.188*4
         egain = 1.9 # 'DETGAIN'
         times_method = 3
+    elif telescope == 'KUIPER':
+        filter_h_name = 'FILTER'
+        long_h_name = None
+        lat_h_name = None
+        alt_h_name = None
+        sitelong = -110.73453
+        sitelat = 32.41647
+        sitealt = 2510
+        exptime_h_name = 'EXPTIME'
+        airmass_h_name = 'AIRMASS'
+        lst_h_name = 'LST-OBS'
+        t_scale_low = 0.145
+        t_scale_high = 0.145*4
+        egain = 3.173 # 'GAIN1'
+        times_method = 3    
 
     else:
         print( 'ERROR: the selected telescope '+telescope+' is not supported.' )
@@ -1347,6 +1362,7 @@ def get_general_coords(target,date):
     date = date.replace('-', '')
     try:
         # Try to get info from Simbad
+        print('\t Getting coordinates for target: {:}'.format(target))
         result = Simbad.query_object(target)
     except:
         # Manually load values

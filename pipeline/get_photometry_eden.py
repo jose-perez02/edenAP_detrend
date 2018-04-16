@@ -118,7 +118,7 @@ for i in range(len(files)):
     else:
         target = h0['OBJECT']
         filter = h0['FILTER']
-        obj_name = '{:}-{:}'.format(target.replace(' ', ''), filter)
+        obj_name = '{:}-{:}'.format(target, filter)
         object_in_files[i] = obj_name
         if ('bias' in obj_name) or ('flat' in obj_name) or ('dark' in obj_name):
             continue
