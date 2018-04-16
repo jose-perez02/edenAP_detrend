@@ -159,7 +159,7 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
             f2.write(str(t[i])+'\t'+str(rf[i])+'\t'+str(rf_err[i])+'\n')
     f.close()
     if plot_data:
-        # Bin on a 10-min window:
+        # Bin on a 15-min window:
         t_min = np.min(t)
         t_hours = (t - t_min) * 24.
         bin_width = 15./60. # hr
@@ -181,7 +181,7 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
         # Make plot
         fig = plt.figure()
         plt.errorbar(t_hours,rf,rf_err,fmt='o',alpha=0.3,label='Data')
-        plt.errorbar(np.array(times_bins),np.array(fluxes_bins),np.array(errors_bins),fmt='o',label='Binned data')
+        plt.errorbar(np.array(times_bins),np.array(fluxes_bins),np.array(errors_bins),fmt='o',label='15-min bins')
         plt.annotate('$\sigma_{{m}}$ = {:.0f} ppm = {:.1f} mmag'.format(sigma*1e6, sigma_mag*1e3), 
                      xy=(0.5, 0.05), xycoords='axes fraction', va='bottom', ha='center')
         plt.xlabel('Time from start (hr)')
