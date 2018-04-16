@@ -1387,6 +1387,7 @@ def get_general_coords(target,date):
         # Load proper motions as arcsec / year
         pmra = result['PMRA'].to(u.arcsec/u.year).value[0]
         pmdec = result['PMDEC'].to(u.arcsec/u.year).value[0]
+        print('\t\t proper motion: {:}, {:} arcsec/yr'.format(pmra, pmdec))
         # Convert RA and DEC to whole numbers:
         ra = np.double(rahh)+(np.double(ramm)/60.)+(np.double(rass)/3600.)
         if np.double(decdd)<0:
@@ -1401,8 +1402,9 @@ def get_general_coords(target,date):
         dt = dateutil.parser.parse(s)
         data_jd = sum(jdcal.gcal2jd(dt.year, dt.month, dt.day))
         deltat = (data_jd-2451544.5)/365.25
+        print('deltat', deltat)
         # Calculate total PM:
-        pmra = np.double(pmra)*deltat/15. # Conversion from arcsec to sec
+        pmra = np.double(pmra)*deltat
         pmdec = np.double(pmdec)*deltat
         # Correct proper motion:
         c_ra = ra + ((pmra)/3600.)
