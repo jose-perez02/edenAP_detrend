@@ -479,9 +479,9 @@ cf = os.path.expanduser(cf)
 if telescope == 'SWOPE':
     foldername = cf + telescope+'/red/'+date+'/'+target_name+'/'
 elif telescope == 'CHAT':
-    foldername = cf + 'red/'+date+'/'+target_name+'-'+band+'/'
+    foldername = cf + 'red/'+date+'/'+target_name+'_'+band+'/'
 else:
-    foldername = cf +'red/'+date+'/'+target_name+'-'+band+'/'
+    foldername = cf +'red/'+date+'/'+target_name+'_'+band+'/'
 
 post_dir = foldername+'post_processing/'
 if not os.path.exists(post_dir):
@@ -551,7 +551,7 @@ for site in sites:
     idx_frames = frames_from_site[site]
     times = data['BJD_times'][idx_frames]
     idx_sort_times = np.argsort(times)
-    cam = (site.split('+')[-1]).split('-')[-1]
+    cam = (site.split('+')[-1]).split('_')[-1]
     print ('\t Frames:',data['frame_name'][idx_frames])
     # Check which is the aperture that gives a minimum rms:
     if force_aperture:

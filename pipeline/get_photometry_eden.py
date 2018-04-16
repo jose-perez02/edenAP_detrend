@@ -105,6 +105,10 @@ all_ras = []     # This saves the RA of each object
 all_decs = []    # This saves the DEC of each object
 object_in_files = len(files)*[''] # This saves what object is in each file
 
+for file in files:
+    if file.endswith('.wcs.fits') or file.endswith('_gf.fits'):
+        files.remove(file)
+
 good_objects = []
 for i in range(len(files)):
     f = files[i]
@@ -118,7 +122,7 @@ for i in range(len(files)):
     else:
         target = h0['OBJECT']
         filter = h0['FILTER']
-        obj_name = '{:}-{:}'.format(target, filter)
+        obj_name = '{:}_{:}'.format(target, filter)
         object_in_files[i] = obj_name
         if ('bias' in obj_name) or ('flat' in obj_name) or ('dark' in obj_name):
             continue
@@ -136,10 +140,6 @@ for i in range(len(files)):
         good_objects.append(i)
 
 files = [ files[i] for i in good_objects ]
-for file in files:
-    if file.endswith('.wcs.fits'):
-        files.remove(file)
-
 object_in_files = [ object_in_files[i] for i in good_objects ]
 
 print( '\t Found ',len(all_objects),' object(s) for the observations under '+datafolder )

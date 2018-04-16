@@ -358,9 +358,9 @@ for i in range(len(dates_raw)):
             target = target_folder.split('/')[-1]
             print( 'Post-processing target '+target+' in folder '+target_folder )
             # Try to get coordinates from Simbad or manual_coordinates.dat
-            splitted_name = target.split('-')
+            splitted_name = target.split('_')
             band = splitted_name[-1]
-            target_name = '-'.join(splitted_name[:-1])
+            target_name = '_'.join(splitted_name[:-1])
             RA, DEC = PhotUtils.get_general_coords(target_name,dates_raw[i])
             if RA == 'NoneFound':
                 targetok = False
