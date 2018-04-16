@@ -79,8 +79,8 @@ def check_star(data,idx,min_ap,max_ap,force_aperture,forced_aperture, max_comp_d
                 target_flux = data['data']['target_star_'+str(idx)]['fluxes_'+str(chosen_aperture)+'_pix_ap']
                 target_flux_err = data['data']['target_star_'+str(idx)]['fluxes_'+str(chosen_aperture)+'_pix_ap_err']
         nzero = np.where(target_flux<0)[0]
-    if len(nzero)>0:
-        return False
+        if len(nzero)>0:
+            return False
     else:
         chosen_aperture = forced_aperture
         try:
@@ -339,27 +339,13 @@ def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap,
                 print ('Centroid:',cen_x, cen_y)
         
     # Get the centroids of the target:
-    try:
-        target_cen_x = data['data']['star_'+str(idx)]['centroids_x'][idx_frames]
-        target_cen_y = data['data']['star_'+str(idx)]['centroids_y'][idx_frames]
-        print ('Target:','star_'+str(idx))
-    except:
-        target_cen_x = data['data']['target_star_'+str(idx)]['centroids_x'][idx_frames]
-        target_cen_y = data['data']['target_star_'+str(idx)]['centroids_y'][idx_frames]
-        print ('Target:','target_star_'+str(idx))
-
-#         print (target_cen_x)
-#         print (target_cen_y)
+    target_cen_x, target_cen_y = get_cens(data, idx, idx_frames)
+    print ('Target:','target_star_'+str(idx))
 
     # Same for the comparison stars:
     for i in range(len(idx_comparison)):
         idx_c = idx_comparison[i]
-        try:
-            comp_cen_x = data['data']['star_'+str(idx_c)]['centroids_x'][idx_frames]
-            comp_cen_y = data['data']['star_'+str(idx_c)]['centroids_y'][idx_frames]
-        except:
-            comp_cen_x = data['data']['target_star_'+str(idx_c)]['centroids_x'][idx_frames]
-            comp_cen_y = data['data']['target_star_'+str(idx_c)]['centroids_y'][idx_frames]
+        comp_cen_x, comp_cen_y = get_cens(data, idx_c, idx_frames)
         if i==0:
             all_comp_cen_x = np.atleast_2d(comp_cen_x)
             all_comp_cen_y = np.atleast_2d(comp_cen_y)
@@ -415,6 +401,15 @@ def median_filter(arr):
     if median_window%2==0:
         median_window += 1
     return medfilt(arr, median_window)
+
+def get_cens(data, idx, idx_frames):
+    try:
+        cen_x = data['data']['star_'+str(idx)]['centroids_x'][idx_frames]
+        cen_y = data['data']['star_'+str(idx)]['centroids_y'][idx_frames]
+    except:
+        cen_x = data['data']['target_star_'+str(idx)]['centroids_x'][idx_frames]
+        cen_y = data['data']['target_star_'+str(idx)]['centroids_y'][idx_frames]
+    return cen_x, cen_y
 
 ################ INPUT DATA #####################
 
@@ -569,6 +564,7 @@ for site in sites:
             aperture = apertures_to_check[i]
             # Check the target
             relative_flux, relative_flux_err = super_comparison_detrend(data, idx, idx_all_comps, aperture, all_idx = idx_frames)
+            
             save_photometry(times[idx_sort_times], relative_flux[idx_sort_times], relative_flux_err[idx_sort_times],
                             post_dir+'post_processing_outputs/', target_name='target_photometry_ap'+str(aperture)+'_pix',
                             plot_data=True)
