@@ -159,17 +159,20 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
             f2.write(str(t[i])+'\t'+str(rf[i])+'\t'+str(rf_err[i])+'\n')
     f.close()
     if plot_data:
-        # Bin on a n-point window:
+        # Bin on a 10-min window:
         t_min = np.min(t)
         t_hours = (t - t_min) * 24.
+        bin_width = 15./60. # hr
+        bins = (t_hours/bin_width).astype('int')
         n_bin = 10
         times_bins = []
         fluxes_bins = []
         errors_bins = []
-        for i in range(0,len(t),n_bin):
-            times_bins.append(np.median(t_hours[i:i+n_bin-1]))
-            fluxes_bins.append(np.median(rf[i:i+n_bin-1]))
-            errors_bins.append(np.sqrt(np.sum(rf_err[i:i+n_bin-1]**2))/np.double(n_bin))
+        for i_bin in np.unique(bins):
+            idx = np.where(bins==i_bin)
+            times_bins.append(np.median(t_hours[idx]))
+            fluxes_bins.append(np.median(rf[idx]))
+            errors_bins.append(np.sqrt(np.sum(rf_err[idx]**2))/np.double(len(idx[0])))
         
         # Calculate standard deviation of median filtered data
         mfilt = median_filter(rf)
@@ -678,7 +681,7 @@ for site in sites:
 
     print ('\t Saving...')
     save_photometry(times[idx_sort_times], relative_flux[idx_sort_times], relative_flux_err[idx_sort_times], \
-                    post_dir, target_name=target_name, plot_data=True, title=target_name+' on '+foldername.split('/')[-3]+' at '+site)
+                    post_dir, target_name=target_name, plot_data=True, title=target_name+' on '+foldername.split('/')[-3]+' in '+band+' at '+site)
 
     save_photometry_hs(data, idx, idx_comparison, chosen_aperture, min_ap, max_ap, 
                        comp_apertures, idx_sort_times, post_dir, target_name, band=band, all_idx=idx_frames)
