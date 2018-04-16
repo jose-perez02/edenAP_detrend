@@ -596,7 +596,7 @@ for site in sites:
         best_precision = np.inf
         for i in range(len(idx_all_comps_sorted)):
             # Check the target
-            relative_flux, relative_flux_err = super_comparison_detrend(data, idx, idx_all_comps_sorted[0:i+1], aperture, all_idx = idx_frames)
+            relative_flux, relative_flux_err = super_comparison_detrend(data, idx, idx_all_comps_sorted[0:i+1], chosen_aperture, all_idx = idx_frames)
             mfilt = median_filter(relative_flux[idx_sort_times])
 #             prec = get_sigma((relative_flux[idx_sort_times] - mfilt)*1e6)
             prec = np.median(relative_flux_err)*1e6
