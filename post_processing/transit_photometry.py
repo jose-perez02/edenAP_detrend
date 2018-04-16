@@ -502,18 +502,11 @@ all_cameras = len(data['frame_name'])*[[]]
 
 for i in range(len(data['frame_name'])):
     frames = data['frame_name'][i]
-    d,h = pyfits.getdata(frames,header=True)
+    with pyfits.open(frames) as hdulist:
+        h = hdulist[0].header
     try:
-        if h['SITE'] != '' and h['INSTRUME'] != '':
-            all_cameras[i] = 'sinistro'
-            #if h['INSTRUME'] in ['fl03','fl04','fl02','fl06']:
-            #    all_cameras[i] = 'sinistro'
-            #else:
-            #    all_cameras[i] = 'sbig'
-            all_sites[i] = h['SITE']
-        else:
-            all_sites[i] = telescope 
-            all_cameras[i] = h['INSTRUME']
+        all_sites[i] = telescope 
+        all_cameras[i] = h['INSTRUME']
     except:
         all_sites[i] = telescope
         all_cameras[i] = 'VATT4k'
