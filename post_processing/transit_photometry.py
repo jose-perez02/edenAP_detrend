@@ -159,10 +159,10 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
             f2.write(str(t[i])+'\t'+str(rf[i])+'\t'+str(rf_err[i])+'\n')
     f.close()
     if plot_data:
-        # Bin on a 15-min window:
+        # Bin on a 10-min window:
         t_min = np.min(t)
         t_hours = (t - t_min) * 24.
-        bin_width = 15./60. # hr
+        bin_width = 10./60. # hr
         bins = (t_hours/bin_width).astype('int')
         n_bin = 10
         times_bins = []
@@ -181,22 +181,22 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
         # Make plot
         fig = plt.figure()
         plt.errorbar(t_hours,rf,rf_err,fmt='o',alpha=0.3,label='Data')
-        plt.errorbar(np.array(times_bins),np.array(fluxes_bins),np.array(errors_bins),fmt='o',label='15-min bins')
+        plt.errorbar(np.array(times_bins),np.array(fluxes_bins),np.array(errors_bins),fmt='o',label='10-min bins')
         plt.annotate('$\sigma_{{m}}$ = {:.0f} ppm = {:.1f} mmag'.format(sigma*1e6, sigma_mag*1e3), 
                      xy=(0.5, 0.05), xycoords='axes fraction', va='bottom', ha='center')
+        print(sigma*1e6, np.median(rf_err)*1e6)
         plt.xlabel('Time from start (hr)')
         plt.ylabel(units)
         plt.title(title,fontsize='12')
         plt.xlim(-0.05*np.ptp(t_hours), 1.05*np.ptp(t_hours))
         nom_ymin = 0.95
-        data_min = np.median(rf-rf_err) - 5*get_sigma(rf)
+        data_min = np.max([np.min(rf-2*rf_err), np.median(rf-rf_err)-15*get_sigma(rf-median_filter(rf))])
         nom_ymax = 1.05
-        data_max = np.median(rf+rf_err) + 5*get_sigma(rf)
+        data_max = np.min([np.max(rf+2*rf_err), np.median(rf+rf_err)+15*get_sigma(rf-median_filter(rf))])
         try:
             plt.ylim(data_min, data_max)
         except:
             plt.ylim(nom_ymin, nom_ymax)
-        plt.ylim(data_min, data_max)
         x_formatter = ticker.ScalarFormatter(useOffset=False)
         plt.gca().xaxis.set_major_formatter(x_formatter)
         plt.legend()
