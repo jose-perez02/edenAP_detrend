@@ -155,6 +155,7 @@ R = np.arange(min_aperture,max_aperture+1,aperture_step)
 # Get photometry for the objects:
 for i in range(len(all_objects)):
     obj_name = all_objects[i]
+    target, filter = obj_name.split('_')
     print( '\t Working on '+obj_name )
     out_data_folder = out_red_folder+datafolder+'/'+obj_name+'/'
     all_files = []
@@ -170,11 +171,12 @@ for i in range(len(all_objects)):
         master_dict = pickle.load(open(out_data_folder+'photometry.pkl','rb'))
 
     # Get master dictionary for photometry, saving progress every 10 files:
-    n_chunks = int(len(all_files)/10)
-    if n_chunks > 0:
-        chunked_files = np.array_split(all_files, n_chunks)
-    else:
-        chunked_files = [all_files]
+    n_chunks = np.max([1, int(len(all_files)/10)])
+    chunked_files = np.array_split(all_files, n_chunks)
+#     if n_chunks > 0:
+#         chunked_files = np.array_split(all_files, n_chunks)
+#     else:
+#         chunked_files = [all_files]
     for chunk in chunked_files:
         master_dict = PhotUtils.getPhotometry(chunk,telescope,R,ra_obj,dec_obj,out_data_folder,filter,\
                                               get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
