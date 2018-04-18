@@ -171,7 +171,10 @@ for i in range(len(all_objects)):
 
     # Get master dictionary for photometry, saving progress every 10 files:
     n_chunks = int(len(all_files)/10)
-    chunked_files = np.array_split(all_files, n_chunks)
+    if n_chunks > 0:
+        chunked_files = np.array_split(all_files, n_chunks)
+    else:
+        chunked_files = [all_files]
     for chunk in chunked_files:
         master_dict = PhotUtils.getPhotometry(chunk,telescope,R,ra_obj,dec_obj,out_data_folder,filter,\
                                               get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
