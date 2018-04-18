@@ -184,7 +184,6 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
         plt.errorbar(np.array(times_bins),np.array(fluxes_bins),np.array(errors_bins),fmt='o',label='10-min bins')
         plt.annotate('$\sigma_{{m}}$ = {:.0f} ppm = {:.1f} mmag'.format(sigma*1e6, sigma_mag*1e3), 
                      xy=(0.5, 0.05), xycoords='axes fraction', va='bottom', ha='center')
-        print(sigma*1e6, np.median(rf_err)*1e6)
         plt.xlabel('Time from start (hr)')
         plt.ylabel(units)
         plt.title(title,fontsize='12')
