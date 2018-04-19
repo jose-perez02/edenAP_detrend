@@ -592,16 +592,19 @@ for site in sites:
 
     # Selecting optimal number of comparisons, if not pre-set with flag
     if ncomp==0:
-        best_precision = np.inf
+        closest_yet = np.inf
         for i in range(len(idx_all_comps_sorted)):
             # Check the target
             relative_flux, relative_flux_err = super_comparison_detrend(data, idx, idx_all_comps_sorted[0:i+1], chosen_aperture, all_idx = idx_frames)
             mfilt = median_filter(relative_flux[idx_sort_times])
 #             prec = get_sigma((relative_flux[idx_sort_times] - mfilt)*1e6)
             prec = np.median(relative_flux_err)*1e6
-            if prec < best_precision:
+            rms_scatter = get_sigma(relative_flux[idx_sort_times] - mfilt)*1e6
+            rel_diff = np.abs(prec-rms_scatter)/prec
+            if rel_diff < closest_yet:
                 ncomp = i+1
                 best_precision = prec
+                closest_yet = rel_diff
 
     idx_comparison = idx_all_comps_sorted[0:ncomp]
     print('\t {:} comparison stars available'.format(len(idx_all_comps_sorted)))
