@@ -115,7 +115,7 @@ for i in range(len(files)):
     #print f
     try:
         with pyfits.open(f) as hdulist:
-            d, h0 = hdulist[1].data, hdulist[0].header
+            h0 = hdulist[0].header
     except:
         print( 'File ',f,' is corrupted. Skipping it' )
         raise

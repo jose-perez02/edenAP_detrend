@@ -18,7 +18,7 @@ from matplotlib import ticker
 
 def CoordsToDecimal(coords, hours=False):
     if hours:
-        hh,mm,ss = coords.split(':')
+        hh,mm,ss = coords.lstrip(' ').replace(' ', ':').split(':')
         decimal = np.float(hh) + (np.float(mm)/60.) + \
                   (np.float(ss)/3600.0)
         return decimal * (360./24.)
@@ -28,14 +28,14 @@ def CoordsToDecimal(coords, hours=False):
     for i in range(len(coords)):
         ra_string,dec_string = coords[i]
         # Get hour, minutes and secs from RA string:
-        hh,mm,ss = ra_string.split(':')
+        hh,mm,ss = ra_string.lstrip(' ').replace(' ', ':').split(':')
         # Convert to decimal:
         ra_decimal = np.float(hh) + (np.float(mm)/60.) + \
                      (np.float(ss)/3600.0)
         # Convert to degrees:
         ras = np.append(ras,ra_decimal * (360./24.))
         # Now same thing for DEC:
-        dd,mm,ss = dec_string.split(':')
+        dd,mm,ss = dec_string.lstrip(' ').replace(' ', ':').split(':')
         dec_decimal = np.abs(np.float(dd)) + (np.float(mm)/60.) + \
                       (np.float(ss)/3600.0)
         if dd[0] == '-':
@@ -306,10 +306,16 @@ def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap,
                 comp_apertures, out_dir, frames, idx_frames, half_size=50, overwrite=False):
     def plot_im(d, cen_x, cen_y, obj_x, obj_y, ap, min_ap, max_ap,
                 half_size, frame_name, object_name, overwrite):
-        if not os.path.exists(out_dir+'sub_imgs/'+object_name):
-            os.makedirs(out_dir+'sub_imgs/'+object_name)
-        fname = '{:}/sub_imgs/{:}/{:}_{:}.png'.format(
-                 out_dir, object_name, frame_name.split('/')[-1], object_name)
+        if 'full_frame' in object_name:
+            if not os.path.exists(out_dir+'sub_imgs/'+'full_frame/'):
+                os.makedirs(out_dir+'sub_imgs/'+'full_frame/')
+            fname = '{:}/sub_imgs/{:}/{:}_{:}.png'.format(
+                     out_dir, 'full_frame', object_name, frame_name.split('/')[-1])
+        else:
+            if not os.path.exists(out_dir+'sub_imgs/'+object_name):
+                os.makedirs(out_dir+'sub_imgs/'+object_name)
+            fname = '{:}/sub_imgs/{:}/{:}_{:}.png'.format(
+                     out_dir, object_name, frame_name.split('/')[-1], object_name)
         if not os.path.exists(fname) or overwrite:
             # Plot image of the target:
             fig = plt.figure()
@@ -322,7 +328,7 @@ def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap,
             x_cen = obj_x - x0
             y_cen = obj_y - y0
             im = plt.imshow(subimg)
-            im.set_clim(0, 1000)
+            im.set_clim(np.median(subimg), 1.5*np.percentile(subimg, 97.5))
             plt.plot(x_cen, y_cen, 'wx', markersize=15, lw=2, alpha=0.5)
             circle = plt.Circle((x_cen, y_cen), min_ap, color='black', lw=2, alpha=0.5, fill=False)
             circle2 = plt.Circle((x_cen ,y_cen), max_ap, color='black', lw=2, alpha=0.5, fill=False)
@@ -363,19 +369,29 @@ def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap,
             for name in names_ext:
                 if 'target' in name:
                     # Plot image of the target:
+                    if i==0:
+                        plot_im(d, target_cen_x[0], target_cen_y[0],
+                                target_cen_x[i], target_cen_y[i],
+                                aperture, min_ap, max_ap,
+                                4*half_size, frames[i], 'target_full_frame', overwrite)
                     plot_im(d, target_cen_x[0], target_cen_y[0],
                             target_cen_x[i], target_cen_y[i],
                             aperture, min_ap, max_ap,
-                            half_size, frames[i],'target', overwrite)
+                            half_size, frames[i], 'target', overwrite)
             # Plot image of the comparisons:
             for j in range(len(idx_comparison)):
                 idx_c = idx_comparison[j]
                 name = 'star_'+str(idx_c)
                 if name in names_ext:
+                    if i==0:
+                        plot_im(d, np.median(all_comp_cen_x[j,:]), np.median(all_comp_cen_y[j,:]), 
+                                all_comp_cen_x[j,i], all_comp_cen_y[j,i], 
+                                comp_apertures[j], min_ap, max_ap,
+                                4*half_size, frames[i], name+'_full_frame', overwrite)
                     plot_im(d, np.median(all_comp_cen_x[j,:]), np.median(all_comp_cen_y[j,:]), 
                             all_comp_cen_x[j,i], all_comp_cen_y[j,i], 
                             comp_apertures[j], min_ap, max_ap,
-                            half_size, frames[i],name, overwrite)
+                            half_size, frames[i], name, overwrite)
 
 def plot_cmd(colors, data, idx_target, idx_comparison, post_dir):
     """

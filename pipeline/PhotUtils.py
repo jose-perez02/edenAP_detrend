@@ -178,6 +178,8 @@ def getAirmass(ra,dec,day,longitude,latitude,elevation):
 
     star.compute(observer)
     airmass = secz(star.alt)
+#     h = star.alt * np.pi/180.
+#     airmass = 1./np.sin(h + 244./(165.+47.*h**1.1))
     return airmass
 
 def get_planet_data(planet_data,target_object_name):
@@ -424,21 +426,6 @@ def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filte
         egain = 'HIERARCH ESO DET OUT1 GAIN'
         times_method = 2
 
-    elif telescope == 'VATT':
-        filter_h_name = 'FILTER'
-        long_h_name = None
-        lat_h_name = None
-        alt_h_name = None
-        sitelong = -109.892014
-        sitelat = 32.701303
-        sitealt = 3191
-        exptime_h_name = 'EXPTIME'
-        airmass_h_name = 'AIRMASS'
-        lst_h_name = 'ST'
-        t_scale_low = 0.188
-        t_scale_high = 0.188*4
-        egain = 1.9 # 'DETGAIN'
-        times_method = 3
     elif telescope == 'KUIPER':
         filter_h_name = 'FILTER'
         long_h_name = None
@@ -446,15 +433,44 @@ def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filte
         alt_h_name = None
         sitelong = -110.73453
         sitelat = 32.41647
-        sitealt = 2510
+        sitealt = 2510.
         exptime_h_name = 'EXPTIME'
         airmass_h_name = 'AIRMASS'
         lst_h_name = 'LST-OBS'
         t_scale_low = 0.145
         t_scale_high = 0.145*4
         egain = 3.173 # 'GAIN1'
-        times_method = 3    
+        times_method = 3
 
+    elif telescope == 'SCHULMAN':
+        filter_h_name = 'FILTER'
+        long_h_name = 'LONG-OBS'
+        lat_h_name = 'LAT-OBS'
+        alt_h_name = 'ALT-OBS'
+        exptime_h_name = 'EXPTIME'
+        airmass_h_name = 'AIRMASS'
+        lst_h_name = 'ST'
+        t_scale_low = 0.3
+        t_scale_high = 0.33 #0.3*4
+        egain = 1.28 # 'EGAIN'
+        times_method = 2
+
+    elif telescope == 'VATT':
+        filter_h_name = 'FILTER'
+        long_h_name = None
+        lat_h_name = None
+        alt_h_name = None
+        sitelong = -109.892014
+        sitelat = 32.701303
+        sitealt = 3191.
+        exptime_h_name = 'EXPTIME'
+        airmass_h_name = 'AIRMASS'
+        lst_h_name = 'ST'
+        t_scale_low = 0.188
+        t_scale_high = 0.188*4
+        egain = 1.9 # 'DETGAIN'
+        times_method = 3
+        
     else:
         print( 'ERROR: the selected telescope '+telescope+' is not supported.' )
         sys.exit()
@@ -604,7 +620,7 @@ def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filte
                 else:
                     year,month,day,hh,mm,ss = getCalDay((t.bcor(coords)).jd)
                     day = getTime(year,month,day,hh,mm,ss)
-                    master_dict['airmasses'] = np.append(master_dict['airmasses'],getAirmass(central_ra[0],central_dec[0],day,longitude,latitude,elevation))
+                    master_dict['airmasses'] = np.append(master_dict['airmasses'],getAirmass(central_ra[0],central_dec[0],day,longitude,latitude,float(elevation)))
 
                 ########## OBTAINING THE FLUXES ###################
                 #master_dict['data']['RA_degs'][223],master_dict['data']['DEC_degs'][223] = 19.4620208,0.3419944
@@ -797,14 +813,14 @@ def run_astrometry(filename, ra=None, dec=None, radius=None, scale_low= 0.1, sca
         print('\t\t Working on extension {:}...'.format(ext))           
         ext_fname = filename.replace('.fits', '_'+str(ext)+'.wcs.fits')
         if (ra is not None) and (dec is not None) and (radius is not None):
-            p = subprocess.Popen(astrometry_directory+'solve-field --overwrite --extension '+ str(ext)+\
+            p = subprocess.Popen(astrometry_directory+'solve-field --overwrite --no-plots --downsample 3 --cpulimit 60 --extension '+ str(ext)+\
                     ' --scale-units arcsecperpix --scale-low '+str(scale_low)+' --scale-high '+str(scale_high)+\
                     ' --ra '+str(ra)+' --dec '+str(dec)+' --radius '+str(radius)+\
                     ' --new-fits '+ext_fname+\
                     ' '+filename, stdout = subprocess.PIPE, \
                     stderr = subprocess.PIPE, shell = True)
         else:
-            p = subprocess.Popen(astrometry_directory+'solve-field --overwrite --extension '+ str(ext)+\
+            p = subprocess.Popen(astrometry_directory+'solve-field --overwrite --no-plots --downsample 3 --cpulimit 60 --extension '+ str(ext)+\
                     ' --scale-units arcsecperpix --scale-low '+str(scale_low)+' --scale-high '+str(scale_high)+\
                     ' --new-fits '+ext_fname+\
                     ' '+filename, stdout = subprocess.PIPE, \
@@ -825,12 +841,16 @@ def run_astrometry(filename, ra=None, dec=None, radius=None, scale_low= 0.1, sca
             # Try to save new WCS info in original file
             try:
                 with pyfits.open(ext_fname) as hdulist_new:
-                    hdulist[ext].header = hdulist_new[1].header
+                    if ext==0:
+                        hdulist[ext].header = hdulist_new[ext].header
+                    else:
+                        hdulist[ext].header = hdulist_new[1].header
             # If it doesn't work, copy the WCS info from the last file
-            except:
+            except FileNotFoundError:
                 data_dir = '/'.join(true_filename.split('/')[:-1])
                 this_file = true_filename.split('/')[-1]
-                this_frame = get_trailing_number(this_file.replace('.fits', ''))
+                suffix = get_suffix(this_file)
+                this_frame = get_trailing_number(this_file.replace(suffix, ''))
                 last_frame = this_frame - 1
                 last_file = str(last_frame).join(this_file.split(str(this_frame)))
                 last_filename = '/'.join([data_dir, last_file])
@@ -1092,26 +1112,26 @@ def getApertureFluxes(subimg,x_cen,y_cen,Radius,sky_sigma,GAIN):
     return rawflux_table['aperture_sum'][0],rawflux_table['aperture_sum_err'][0]
 
 def CoordsToDecimal(coords):
-        ras = np.array([])
-        decs = np.array([])
-        for i in range(len(coords)):
-                ra_string,dec_string = coords[i]
-                # Get hour, minutes and secs from RA string:
-                hh,mm,ss = ra_string.split(':')
-                # Convert to decimal:
-                ra_decimal = np.float(hh) + (np.float(mm)/60.) + \
-                                (np.float(ss)/3600.0)
-                # Convert to degrees:
-                ras = np.append(ras,ra_decimal * (360./24.))
-                # Now same thing for DEC:
-                dd,mm,ss = dec_string.split(':')
-                dec_decimal = np.abs(np.float(dd)) + (np.float(mm)/60.) + \
-                                (np.float(ss)/3600.0)
-                if dd[0] == '-':
-                        decs = np.append(decs,-1*dec_decimal)
-                else:
-                        decs = np.append(decs,dec_decimal)
-        return ras,decs
+    ras = np.array([])
+    decs = np.array([])
+    for i in range(len(coords)):
+            ra_string,dec_string = coords[i]
+            # Get hour, minutes and secs from RA string:
+            hh,mm,ss = ra_string.replace(' ', ':').split(':')
+            # Convert to decimal:
+            ra_decimal = np.float(hh) + (np.float(mm)/60.) + \
+                            (np.float(ss)/3600.0)
+            # Convert to degrees:
+            ras = np.append(ras,ra_decimal * (360./24.))
+            # Now same thing for DEC:
+            dd,mm,ss = dec_string.replace(' ', ':').split(':')
+            dec_decimal = np.abs(np.float(dd)) + (np.float(mm)/60.) + \
+                            (np.float(ss)/3600.0)
+            if dd[0] == '-':
+                    decs = np.append(decs,-1*dec_decimal)
+            else:
+                    decs = np.append(decs,dec_decimal)
+    return ras,decs
 
 def DecimalToCoords(ra_degs,dec_degs):
     ra_coords = len(ra_degs)*[[]]
@@ -1346,7 +1366,10 @@ def get_exts(filename):
     Returns a list of the fits extensions containing data
     """
     h = pyfits.getheader(filename)
-    EXTEND = h['EXTEND']
+    try:
+        EXTEND = h['EXTEND']
+    except KeyError:
+        EXTEND = False
     if EXTEND:
         exts = range(1, h['NEXTEND']+1)
     else:
@@ -1384,10 +1407,11 @@ def get_general_coords(target,date):
         # Load positions as strings
         rahh, ramm, rass = result['RA'][0].split()
         decdd, decmm, decss = result['DEC'][0].split()
+        print(rahh, ramm, rass, decdd, decmm, decss)
         # Load proper motions as arcsec / year
         pmra = result['PMRA'].to(u.arcsec/u.year).value[0]
         pmdec = result['PMDEC'].to(u.arcsec/u.year).value[0]
-        print('\t\t proper motion: {:}, {:} arcsec/yr'.format(pmra, pmdec))
+        print('\t\t proper motion: {:0.3f}, {:0.3f} arcsec/yr'.format(pmra, pmdec))
         # Convert RA and DEC to whole numbers:
         ra = np.double(rahh)+(np.double(ramm)/60.)+(np.double(rass)/3600.)
         if np.double(decdd)<0:
@@ -1403,7 +1427,8 @@ def get_general_coords(target,date):
         data_jd = sum(jdcal.gcal2jd(dt.year, dt.month, dt.day))
         deltat = (data_jd-2451544.5)/365.25
         # Calculate total PM:
-        pmra = np.double(pmra)*deltat
+#         pmra = np.double(pmra)*deltat # <- This works for AZ Cnc, LSPM J1403+3007
+        pmra = np.double(pmra)*deltat/15. # Conversion from arcsec to sec <- This works for GJ 1214, TRAPPIST-1
         pmdec = np.double(pmdec)*deltat
         # Correct proper motion:
         c_ra = ra + ((pmra)/3600.)
@@ -1415,10 +1440,16 @@ def get_general_coords(target,date):
         dec_deg = int(c_dec)
         dec_min = int(np.abs(c_dec-dec_deg)*60.)
         dec_sec = (np.abs(c_dec-dec_deg)-dec_min/60.)*3600.
+        print(ra_hr, ra_min, ra_sec, dec_deg, dec_min, dec_sec)
         return NumToStr(ra_hr)+':'+NumToStr(ra_min)+':'+NumToStr(ra_sec,roundto=3),\
                NumToStr(dec_deg)+':'+NumToStr(dec_min)+':'+NumToStr(dec_sec,roundto=3)
 
 import re
+def get_suffix(s):
+    m = re.match('.+([0-9])[^0-9]*$', s)
+    idx = m.start(1)+1
+    return s[idx:]
+
 def get_trailing_number(s):
     m = re.search(r'\d+$', s)
     return int(m.group()) if m else None
