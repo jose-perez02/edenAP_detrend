@@ -977,10 +977,11 @@ def getCentroidsAndFluxes(i):
         y_cen = global_y[i] - y0
         if global_refine_centroids:
             # Refine the centroids
-            x_cen, y_cen = get_refined_centroids(subimg, x_cen, y_cen)
+            x_new, y_new = get_refined_centroids(subimg, x_cen, y_cen)
+            if x_new>0 and x_new<global_d.shape[1] and y_new>0 and y_new<global_d.shape[0]:
+                x_cen, y_cen = x_new, y_new
         x_ref = x0 + x_cen
         y_ref = y0 + y_cen
-
         # If saveplot is True, save image and the centroid:
         if global_saveplot and ('target' in global_target_names[i]):
             if not os.path.exists(global_out_dir+global_target_names[i]):
@@ -1000,10 +1001,8 @@ def getCentroidsAndFluxes(i):
             fluxes_R[j],fluxes_err_R[j] = getApertureFluxes(subimg,x_cen,y_cen,global_R[j],sky_sigma,global_GAIN)
         try:
             fwhm = estimate_fwhm(subimg,x_cen,y_cen)
-        except IndexError:
-            pyfits.writeto('subimg.fits', subimg, overwrite=True)
-            print(global_x[i], global_y[i], x_cen, y_cen, x0, y0, x_ref, y_ref)
-            sys.exit()
+        except:
+            fwhm = -1
         return fluxes_R, fluxes_err_R, x_ref, y_ref,background,background_sigma,fwhm
     else:
         return fluxes_R, fluxes_err_R, global_x[i], global_y[i],0.,0.,0.
