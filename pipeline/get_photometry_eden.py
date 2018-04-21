@@ -178,7 +178,7 @@ for i in range(len(all_objects)):
 #     else:
 #         chunked_files = [all_files]
     for chunk in chunked_files:
-        master_dict = PhotUtils.getPhotometry(chunk,telescope,R,ra_obj,dec_obj,out_data_folder,filter,\
+        master_dict = PhotUtils.getPhotometry(chunk,target,telescope,R,ra_obj,dec_obj,out_data_folder,filter,\
                                               get_astrometry = get_astrometry, refine_cen = ref_centers, master_dict = master_dict,\
                                               gf_opt = gf_opt_astrometry)
 

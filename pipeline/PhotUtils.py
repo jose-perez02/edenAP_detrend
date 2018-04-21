@@ -203,7 +203,7 @@ from astroquery.irsa import Irsa
 # Default limit of rows is 500. Go for infinity and beyond!
 Irsa.ROW_LIMIT = np.inf
 import astropy.units as u
-def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, hdulist, exts, R,\
+def get_dict(target,central_ra,central_dec,central_radius, ra_obj, dec_obj, hdulist, exts, R,\
         catalog = u'fp_psc',date='20180101'):
 
     print( '\t > Generating master dictionary for coordinates',central_ra,central_dec,'...' )
@@ -308,6 +308,12 @@ def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, hdulist, ex
         else:
             all_names[i] = 'target_star_'+str(i)
             # Replace RA and DEC with the ones given by the user:
+            ra_str, dec_str = get_general_coords(target, date)
+            ra_deg, dec_deg = CoordsToDecimal([[ra_str, dec_str]])
+            master_dict['data']['RA_degs'][i] = ra_deg
+            master_dict['data']['DEC_degs'][i] = dec_deg
+            master_dict['data']['RA_coords'][i] = ra_str
+            master_dict['data']['DEC_coords'][i] = dec_str
             #try:
             #    master_dict['data']['RA_degs'][i],master_dict['data']['DEC_degs'][i] = ra_obj,dec_obj
             #except:
@@ -329,7 +335,7 @@ def get_dict(central_ra,central_dec,central_radius, ra_obj, dec_obj, hdulist, ex
     return master_dict
 
 from astropy.io import fits
-def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filter,\
+def getPhotometry(filenames,target,telescope,R,ra_obj,dec_obj,out_data_folder,use_filter,\
                   get_astrometry=True,sitelong=None,sitelat=None,sitealt=None,refine_cen=False,\
                   master_dict=None, gf_opt = False):
 
@@ -450,8 +456,8 @@ def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filte
         exptime_h_name = 'EXPTIME'
         airmass_h_name = 'AIRMASS'
         lst_h_name = 'ST'
-        t_scale_low = 0.3
-        t_scale_high = 0.33 #0.3*4
+        t_scale_low = 0.32
+        t_scale_high = 0.32*3
         egain = 1.28 # 'EGAIN'
         times_method = 2
 
@@ -545,7 +551,7 @@ def getPhotometry(filenames,telescope,R,ra_obj,dec_obj,out_data_folder,use_filte
 #                         print (central_ra, central_dec)
 #                         print (ra_obj, dec_obj)
                     if not updating_dict:
-                        master_dict = get_dict(central_ra[0],central_dec[0],search_radius,ra_obj,dec_obj,\
+                        master_dict = get_dict(target,central_ra[0],central_dec[0],search_radius,ra_obj,dec_obj,\
                                                          hdulist, exts, R,date=date)
                     else:
                         all_names = master_dict['data']['names']
@@ -952,12 +958,9 @@ def getAperturePhotometry(d,h,x,y,R,target_names, frame_name = None, out_dir = N
 def getCentroidsAndFluxes(i):
     fluxes_R = np.ones(len(global_R))*(-1)
     fluxes_err_R = np.ones(len(global_R))*(-1)
-    #print fluxes_R
     # Generate a sub-image around the centroid, if centroid is inside the image:
     if global_x[i]>0 and global_x[i]<global_d.shape[1] and \
         global_y[i]>0 and global_y[i]<global_d.shape[0]:
-        #if 'target' in global_target_names[i]:
-        #    print 'im in!!'
         x0 = np.max([0,int(global_x[i])-global_half_size])
         x1 = np.min([int(global_x[i])+global_half_size,global_d.shape[1]])
         y0 = np.max([0,int(global_y[i])-global_half_size])
@@ -980,7 +983,6 @@ def getCentroidsAndFluxes(i):
 
         # If saveplot is True, save image and the centroid:
         if global_saveplot and ('target' in global_target_names[i]):
-            #print 'Got inside!'
             if not os.path.exists(global_out_dir+global_target_names[i]):
                 os.mkdir(global_out_dir+global_target_names[i])
             im = plt.imshow(subimg)
@@ -996,12 +998,14 @@ def getCentroidsAndFluxes(i):
         # With the calculated centroids, get aperture photometry:
         for j in range(len(global_R)):
             fluxes_R[j],fluxes_err_R[j] = getApertureFluxes(subimg,x_cen,y_cen,global_R[j],sky_sigma,global_GAIN)
-        #if 'target' in global_target_names[i]:
-        #    print fluxes_R[0],fluxes_R[-1]
-        return fluxes_R, fluxes_err_R, x_ref, y_ref,background,background_sigma,estimate_fwhm(subimg,x_cen,y_cen)
+        try:
+            fwhm = estimate_fwhm(subimg,x_cen,y_cen)
+        except IndexError:
+            pyfits.writeto('subimg.fits', subimg, overwrite=True)
+            print(global_x[i], global_y[i], x_cen, y_cen, x0, y0, x_ref, y_ref)
+            sys.exit()
+        return fluxes_R, fluxes_err_R, x_ref, y_ref,background,background_sigma,fwhm
     else:
-        #if 'target' in global_target_names[i]:
-        #    print 'im NOT in for ',global_target_names[i]
         return fluxes_R, fluxes_err_R, global_x[i], global_y[i],0.,0.,0.
 
 import warnings
@@ -1385,7 +1389,7 @@ def get_general_coords(target,date):
     date = date.replace('-', '')
     try:
         # Try to get info from Simbad
-        print('\t Getting coordinates for target: {:}'.format(target))
+#         print('\t Getting coordinates for target: {:}'.format(target))
         result = Simbad.query_object(target)
     except:
         # Manually load values
@@ -1407,11 +1411,10 @@ def get_general_coords(target,date):
         # Load positions as strings
         rahh, ramm, rass = result['RA'][0].split()
         decdd, decmm, decss = result['DEC'][0].split()
-        print(rahh, ramm, rass, decdd, decmm, decss)
         # Load proper motions as arcsec / year
         pmra = result['PMRA'].to(u.arcsec/u.year).value[0]
         pmdec = result['PMDEC'].to(u.arcsec/u.year).value[0]
-        print('\t\t proper motion: {:0.3f}, {:0.3f} arcsec/yr'.format(pmra, pmdec))
+#         print('\t\t proper motion: {:0.3f}, {:0.3f} arcsec/yr'.format(pmra, pmdec))
         # Convert RA and DEC to whole numbers:
         ra = np.double(rahh)+(np.double(ramm)/60.)+(np.double(rass)/3600.)
         if np.double(decdd)<0:
@@ -1440,7 +1443,6 @@ def get_general_coords(target,date):
         dec_deg = int(c_dec)
         dec_min = int(np.abs(c_dec-dec_deg)*60.)
         dec_sec = (np.abs(c_dec-dec_deg)-dec_min/60.)*3600.
-        print(ra_hr, ra_min, ra_sec, dec_deg, dec_min, dec_sec)
         return NumToStr(ra_hr)+':'+NumToStr(ra_min)+':'+NumToStr(ra_sec,roundto=3),\
                NumToStr(dec_deg)+':'+NumToStr(dec_min)+':'+NumToStr(dec_sec,roundto=3)
 
