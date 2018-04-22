@@ -819,14 +819,14 @@ def run_astrometry(filename, ra=None, dec=None, radius=None, scale_low= 0.1, sca
         print('\t\t Working on extension {:}...'.format(ext))           
         ext_fname = filename.replace('.fits', '_'+str(ext)+'.wcs.fits')
         if (ra is not None) and (dec is not None) and (radius is not None):
-            p = subprocess.Popen(astrometry_directory+'solve-field --overwrite --no-plots --downsample 3 --cpulimit 60 --extension '+ str(ext)+\
+            p = subprocess.Popen(astrometry_directory+'solve-field --overwrite --no-plots --downsample 2 --cpulimit 60 --extension '+ str(ext)+\
                     ' --scale-units arcsecperpix --scale-low '+str(scale_low)+' --scale-high '+str(scale_high)+\
                     ' --ra '+str(ra)+' --dec '+str(dec)+' --radius '+str(radius)+\
                     ' --new-fits '+ext_fname+\
                     ' '+filename, stdout = subprocess.PIPE, \
                     stderr = subprocess.PIPE, shell = True)
         else:
-            p = subprocess.Popen(astrometry_directory+'solve-field --overwrite --no-plots --downsample 3 --cpulimit 60 --extension '+ str(ext)+\
+            p = subprocess.Popen(astrometry_directory+'solve-field --overwrite --no-plots --downsample 2 --cpulimit 60 --extension '+ str(ext)+\
                     ' --scale-units arcsecperpix --scale-low '+str(scale_low)+' --scale-high '+str(scale_high)+\
                     ' --new-fits '+ext_fname+\
                     ' '+filename, stdout = subprocess.PIPE, \
