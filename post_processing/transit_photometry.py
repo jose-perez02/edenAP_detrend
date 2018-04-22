@@ -178,11 +178,16 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
         mfilt = median_filter(rf)
         sigma = get_sigma(rf-mfilt) / np.median(rf)
         sigma_mag = -2.5*np.log10((1.-sigma)/1.)
+        mfilt_bin = median_filter(fluxes_bins)
+        sigma_bin = get_sigma(fluxes_bins-mfilt_bin) / np.median(fluxes_bins)
+        sigma_mag_bin = -2.5*np.log10((1.-sigma_bin)/1.)
         # Make plot
         fig = plt.figure()
         plt.errorbar(t_hours,rf,rf_err,fmt='o',alpha=0.3,label='Data')
         plt.errorbar(np.array(times_bins),np.array(fluxes_bins),np.array(errors_bins),fmt='o',label='10-min bins')
         plt.annotate('$\sigma_{{m}}$ = {:.0f} ppm = {:.1f} mmag'.format(sigma*1e6, sigma_mag*1e3), 
+                     xy=(0.5, 0.10), xycoords='axes fraction', va='bottom', ha='center')
+        plt.annotate('$\sigma_{{m,bin}}$ = {:.0f} ppm = {:.1f} mmag'.format(sigma_bin*1e6, sigma_mag_bin*1e3), 
                      xy=(0.5, 0.05), xycoords='axes fraction', va='bottom', ha='center')
         plt.xlabel('Time from start (hr)')
         plt.ylabel(units)
