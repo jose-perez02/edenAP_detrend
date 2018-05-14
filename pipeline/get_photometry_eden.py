@@ -91,7 +91,7 @@ print ('\t Pre-processing....')
 print ('\t ###################################')
 
 if not os.path.exists(out_red_folder+datafolder+'/'):
-        os.mkdir(out_red_folder+datafolder+'/')
+        os.makedirs(out_red_folder+datafolder+'/')
 
 # Now, organize all observed objects in the given observing night:
 files = sorted(glob.glob(out_raw_folder+datafolder+'/*.fits'))

@@ -477,6 +477,22 @@ def getPhotometry(filenames,target,telescope,R,ra_obj,dec_obj,out_data_folder,us
         egain = 1.9 # 'DETGAIN'
         times_method = 3
         
+    elif telescope == 'BOK': 
+    	filter_h_name = 'FILTER'
+    	long_h_name = None
+    	lat_h_name = None
+    	alt_h_name = None
+    	sitelong = -111.6
+    	sitelat = 31.98
+    	sitealt = 2120.
+    	exptime_h_name = 'EXPTIME'
+    	airmass_h_name = 'AIRMASS'
+    	lst_h_name = 'ST'
+    	t_scale_low = 0.1
+    	t_scale_high = 0.4*4
+    	egain = 1.5
+    	times_method = 3
+    	
     else:
         print( 'ERROR: the selected telescope '+telescope+' is not supported.' )
         sys.exit()
@@ -861,7 +877,7 @@ def run_astrometry(filename, ra=None, dec=None, radius=None, scale_low= 0.1, sca
                 last_file = str(last_frame).join(this_file.split(str(this_frame)))
                 last_filename = '/'.join([data_dir, last_file])
                 last_wcs_filename = last_filename.replace('.fits', '.wcs.fits')
-                print('\t\t Astronometry failed for extension {:}'.format(ext))
+                print('\t\t Astrometry failed for extension {:}'.format(ext))
                 print('\t\t Using WCS info from previous frame {:}'.format(last_wcs_filename))
                 with pyfits.open(last_wcs_filename) as hdulist_new:
                     hdulist[ext].header = hdulist_new[ext].header
@@ -1408,6 +1424,8 @@ def get_general_coords(target,date):
     else:
         # Assuming the Simbad query worked, load the coordinates:
         # Load positions as strings
+        if result is None:
+            print("WARNING: Simbad query for {0} failed!".format(target))
         rahh, ramm, rass = result['RA'][0].split()
         decdd, decmm, decss = result['DEC'][0].split()
         # Load proper motions as arcsec / year

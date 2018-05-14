@@ -297,13 +297,13 @@ emailreceiver,ASTROMETRY,GF_ASTROMETRY,REF_CENTERS = read_setupfile()
 
 emails_to_send = emailreceiver #['nestor.espinozap@gmail.com','daniel.bayliss01@gmail.com','andres.jordan@gmail.com']
 
-folders_raw = sorted(glob.glob(data_folder+'raw/*'))
+folders_raw = sorted(glob.glob(data_folder+'raw/*/*/*'))
 dates_raw = len(folders_raw)*[[]]
 for i in range(len(folders_raw)):
     dates_raw[i] = folders_raw[i].split('/')[-1]
 if not os.path.exists(data_folder+'red/'):
     os.mkdir(data_folder+'red/')
-folders_red = sorted(glob.glob(data_folder+'red/*'))
+folders_red = sorted(glob.glob(data_folder+'red/*/*/*'))
 dates_red = len(folders_red)*[[]]
 for i in range(len(folders_red)):
     dates_red[i] = folders_red[i].split('/')[-1]
@@ -313,9 +313,16 @@ for i in range(len(folders_red)):
 today_jd = sum(jdcal.gcal2jd(str(datetime.today().year), str(datetime.today().month), str(datetime.today().day)))
 for i in range(len(dates_raw)):
     first_HS_login = True
-    year = int(dates_raw[i][:4])
-    month = int(dates_raw[i][4:6])
-    day = int(dates_raw[i][6:8])
+    # If there are dashes in the date, use split
+    if '-' in dates_raw[i]:
+    	year = dates_raw[i].split('-')[0]
+    	month = dates_raw[i].split('-')[1]
+    	day = dates_raw[i].split('-')[2]
+    # Otherwise...
+    else:
+    	year = int(dates_raw[i][:4])
+    	month = int(dates_raw[i][4:6])
+    	day = int(dates_raw[i][6:8])
     s = str(year)+'.'+str(month)+'.'+str(day)
     dt = parser.parse(s)
     data_jd = sum(jdcal.gcal2jd(dt.year, dt.month, dt.day))
@@ -338,8 +345,16 @@ for i in range(len(dates_raw)):
         if REF_CENTERS:
             optional_options += ' --ref_centers'
         
-        os.system('python get_photometry_eden.py -telescope '+telescope+' -datafolder '+dates_raw[i]+optional_options)
+        #os.system('python get_photometry_eden.py -telescope '+telescope+' -datafolder '+dates_raw[i]+optional_options)
         
+        # Get a list of all directories for this night, removing the root data_folder+'/raw'
+        night_dirs = sorted(glob.glob(data_folder+'/raw/*/*/'+dates_raw[i]))
+        night_dirs = ['/'.join(dir.split('/')[-3:]) for dir in night_dirs]
+        
+        # Then reduce each observation for this night (i.e. target+filter combination)
+        for j in range(len(night_dirs)):
+        	print("Target: {0} | Filter: {1}".format(night_dirs[j].split('/')[-3],night_dirs[j].split('/')[-2]))
+        	os.system('python get_photometry_eden.py -telescope '+telescope+' -datafolder '+night_dirs[j]+optional_options)
 #         continue # Post-processing algorithm below needs some work
         
 ########################################################################
@@ -347,8 +362,8 @@ for i in range(len(dates_raw)):
         # Now, assuming it is done, run the post-processing. First, switch to the post-processing folder:
         cwd = os.getcwd()
         os.chdir('../post_processing')
-        out_folder = data_folder+'red/'+dates_raw[i]+'/'
-        target_folders = sorted(glob.glob(out_folder+'*'))
+       #out_folder = data_folder+'red/'+dates_raw[i]+'/'
+        target_folders = sorted(glob.glob(data_folder+'red/*/*/'+dates_raw[i]+'/*'))
 
         # First, go through every observed object for the given night:
         for target_folder in target_folders:
@@ -391,7 +406,7 @@ for i in range(len(dates_raw)):
                 p = subprocess.Popen(code,stdout = subprocess.PIPE, \
                                      stderr = subprocess.PIPE,shell = True)
                 p.wait()
-                out = sorted(glob.glob(data_folder+'red/'+dates_raw[i]+'/'+target+'/*'))
+                out = sorted(glob.glob(data_folder+'red/*/*/'+dates_raw[i]+'/'+target+'/*'))
 #                 for ii in range(len(out)):
 #                     if out[ii].split('/')[-1] == 'sinistro':
 #                         out_folder = out[ii]

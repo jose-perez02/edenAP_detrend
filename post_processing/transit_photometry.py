@@ -496,11 +496,11 @@ if telescope == 'SWOPE':
 elif telescope == 'CHAT':
     foldername = cf + 'red/'+date+'/'+target_name+'_'+band+'/'
 else:
-    foldername = cf +'red/'+date+'/'+target_name+'_'+band+'/'
+    foldername = cf +'red/'+target_name+'/'+band.upper()+'/'+date+'/'+target_name+'_'+band+'/'
 
 post_dir = foldername+'post_processing/'
 if not os.path.exists(post_dir):
-    os.mkdir(post_dir)
+    os.makedirs(post_dir)
 
 filename = 'photometry.pkl'
 target_coords = [[args.ra,args.dec.split()[0]]]
