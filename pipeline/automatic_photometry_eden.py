@@ -345,8 +345,6 @@ for i in range(len(dates_raw)):
         if REF_CENTERS:
             optional_options += ' --ref_centers'
         
-        #os.system('python get_photometry_eden.py -telescope '+telescope+' -datafolder '+dates_raw[i]+optional_options)
-        
         # Get a list of all directories for this night, removing the root data_folder+'/raw'
         night_dirs = sorted(glob.glob(data_folder+'/raw/*/*/'+dates_raw[i]))
         night_dirs = ['/'.join(dir.split('/')[-3:]) for dir in night_dirs]
@@ -354,7 +352,7 @@ for i in range(len(dates_raw)):
         # Then reduce each observation for this night (i.e. target+filter combination)
         for j in range(len(night_dirs)):
         	print("Target: {0} | Filter: {1}".format(night_dirs[j].split('/')[-3],night_dirs[j].split('/')[-2]))
-        	os.system('python get_photometry_eden.py -telescope '+telescope+' -datafolder '+night_dirs[j]+optional_options)
+        	os.system('python3 get_photometry_eden.py -telescope '+telescope+' -datafolder '+night_dirs[j]+optional_options)
 #         continue # Post-processing algorithm below needs some work
         
 ########################################################################
@@ -395,11 +393,11 @@ for i in range(len(dates_raw)):
                 p.wait()
                 out, err = p.communicate()
                 if ap == 'opt':
-                    code = 'python transit_photometry.py -telescope '+telescope+' -datafolder '+\
+                    code = 'python3 transit_photometry.py -telescope '+telescope+' -datafolder '+\
                            dates_raw[i]+' -target_name "'+target_name+'" -band "'+band+\
                            '" -ra " '+RA+'" -dec " '+DEC+'" --plt_images --autosaveLC'
                 else:
-                    code = 'python transit_photometry.py -telescope '+telescope+' -datafolder '+\
+                    code = 'python3 transit_photometry.py -telescope '+telescope+' -datafolder '+\
                            dates_raw[i]+' -target_name "'+target_name+'" -band "'+band+\
                            '" -ra " '+RA+'" -dec " '+DEC+'" --plt_images --force_aperture -forced_aperture '+ap+' --autosaveLC'
                 print( code )
