@@ -297,13 +297,15 @@ emailreceiver,ASTROMETRY,GF_ASTROMETRY,REF_CENTERS = read_setupfile()
 
 emails_to_send = emailreceiver #['nestor.espinozap@gmail.com','daniel.bayliss01@gmail.com','andres.jordan@gmail.com']
 
-folders_raw = sorted(glob.glob(data_folder+'raw/*/*/*'))
+
+# Removes those annoying @eaDir directories which show up on the Synology NAS
+folders_raw = sorted([folder for folder in glob.glob(data_folder+'raw/*/*/*') if '@eaDir' not in folder])
 dates_raw = len(folders_raw)*[[]]
 for i in range(len(folders_raw)):
     dates_raw[i] = folders_raw[i].split('/')[-1]
 if not os.path.exists(data_folder+'red/'):
     os.mkdir(data_folder+'red/')
-folders_red = sorted(glob.glob(data_folder+'red/*/*/*'))
+folders_red = sorted([folder for folder in glob.glob(data_folder+'red/*/*/*') if '@eaDir' not in folder])
 dates_red = len(folders_red)*[[]]
 for i in range(len(folders_red)):
     dates_red[i] = folders_red[i].split('/')[-1]
