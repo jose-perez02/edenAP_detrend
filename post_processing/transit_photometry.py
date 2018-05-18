@@ -496,7 +496,7 @@ if telescope == 'SWOPE':
 elif telescope == 'CHAT':
     foldername = cf + 'red/'+date+'/'+target_name+'_'+band+'/'
 else:
-    foldername = cf +'red/'+target_name+'/'+band.upper()+'/'+date+'/'+target_name+'_'+band+'/'
+    foldername = cf +'red/'+target_name.replace(' ','_')+'/'+band.upper()+'/'+date+'/'+target_name+'_'+band+'/'
 
 post_dir = foldername+'post_processing/'
 if not os.path.exists(post_dir):
