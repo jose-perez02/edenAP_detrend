@@ -332,7 +332,7 @@ for i in range(len(dates_raw)):
     # ~couple of days, but one week is the limit just to be sure):
     if data_jd > today_jd-ndays:
         # Get already reduced targets (if any):
-        bf = sorted(glob.glob(data_folder+'red/'+dates_raw[i]+'/*'))
+        bf = sorted([folder for folder in glob.glob(data_folder+'red/'+dates_raw[i]+'/*') if '@eaDir' not in folder])
         before_target_folders = []
         for tar_dir in bf:
             if os.path.exists(tar_dir+'/sinistro'):
@@ -348,7 +348,7 @@ for i in range(len(dates_raw)):
             optional_options += ' --ref_centers'
         
         # Get a list of all directories for this night, removing the root data_folder+'/raw'
-        night_dirs = sorted(glob.glob(data_folder+'/raw/*/*/'+dates_raw[i]))
+        night_dirs = sorted([folder for folder in glob.glob(data_folder+'/raw/*/*/'+dates_raw[i]) if '@eaDir' not in folder])
         night_dirs = ['/'.join(dir.split('/')[-3:]) for dir in night_dirs]
         
         # Then reduce each observation for this night (i.e. target+filter combination)
@@ -363,7 +363,7 @@ for i in range(len(dates_raw)):
         cwd = os.getcwd()
         os.chdir('../post_processing')
        #out_folder = data_folder+'red/'+dates_raw[i]+'/'
-        target_folders = sorted(glob.glob(data_folder+'red/*/*/'+dates_raw[i]+'/*'))
+        target_folders = sorted([folder for folder in glob.glob(data_folder+'red/*/*/'+dates_raw[i]+'/*') if '@eaDir' not in folder])
 
         # First, go through every observed object for the given night:
         for target_folder in target_folders:
@@ -406,7 +406,7 @@ for i in range(len(dates_raw)):
                 p = subprocess.Popen(code,stdout = subprocess.PIPE, \
                                      stderr = subprocess.PIPE,shell = True)
                 p.wait()
-                out = sorted(glob.glob(data_folder+'red/*/*/'+dates_raw[i]+'/'+target+'/*'))
+                out = sorted([folder for folder in glob.glob(data_folder+'red/*/*/'+dates_raw[i]+'/'+target+'/*') if '@eaDir' not in folder])
 #                 for ii in range(len(out)):
 #                     if out[ii].split('/')[-1] == 'sinistro':
 #                         out_folder = out[ii]
@@ -427,7 +427,7 @@ for i in range(len(dates_raw)):
                     mymail.htmladd('Data reduction was a SUCCESS! Attached is the lightcurve data.')
                     out_folder = out_folder+'_'+ap
                     real_camera = 'sinistro' # from now on, all LCOGT data comes from sinistro cameras
-                    imgs = sorted(glob.glob(out_folder+'/target/*'))
+                    imgs = sorted([folder for folder in glob.glob(out_folder+'/target/*') if '@eaDir' not in folder]) 
   #                     f = data_folder+'raw/'+dates_raw[i]+'/'+(imgs[0].split('/')[-1]).split('.')[0]+'.fits'
   #                     d,h = pyfits.getdata(f, header=True)
                     mymail.htmladd('Camera: '+camera)
