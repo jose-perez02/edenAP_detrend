@@ -173,7 +173,8 @@ def super_comparison_detrend(data, idx, idx_comparison, chosen_aperture,
 
 def save_photometry(t, rf, rf_err, output_folder, target_name,
                     plot_data=False, title='', units='Relative Flux'):
-    rf_mag = -2.5 * np.log10(rf)
+    mag_fact = (100. ** .2)
+    rf_mag = -mag_fact * np.log10(rf)
     rf_mag_err = rf_err * 2.5 / (np.log(10) * rf)
     f = open(output_folder + target_name + '.dat', 'w')
     f2 = open(output_folder + target_name + '_norm_flux.dat', 'w')
@@ -258,7 +259,7 @@ def save_photometry_hs(data, idx, idx_comparison,
         '{5:< 8.4f} {6:<8.4f} {7:< 8.4f} {8:<8.4f} ' + \
         '{9:< 8.4f} {10:< 8.4f} {11:< 8.4f} {12:<8.3f} ' + \
         '{13:<8.3f} {14:<8.3f} {15:<8.3f} {16:< 8.3f} ' + \
-        '{17:< 8.2f} {18:<8.2f} {19:<8.2f}\n'
+        '{17:< 8.2f} {18:<8.2f} {19:<8.3f}\n'
 
     all_ids = []
     all_ras = []
@@ -309,10 +310,14 @@ def save_photometry_hs(data, idx, idx_comparison,
         r_flux3, r_flux_err3 = super_comparison_detrend(data, i, current_comps, max_aperture,
                                                         comp_apertures=comp_apertures, plot_comps=False,
                                                         all_idx=all_idx)
-
-        rmag1 = -2.512 * np.log10(r_flux1)
-        rmag2 = -2.512 * np.log10(r_flux2)
-        rmag3 = -2.512 * np.log10(r_flux3)
+        # (100.**.2) is equal to 2.512
+        mag_fact = (100.**.2)
+        rmag1 = -mag_fact * np.log10(r_flux1)
+        rmag1_err = r_flux_err1 * mag_fact / (np.log(10) * r_flux1)
+        rmag2 = -mag_fact * np.log10(r_flux2)
+        rmag2_err = r_flux_err2 * mag_fact / (np.log(10) * r_flux2)
+        rmag3 = -mag_fact * np.log10(r_flux3)
+        rmag3_err = r_flux_err3 * mag_fact / (np.log(10) * r_flux3)
 
         idx_not_nan = np.where(~np.isnan(rmag1))[0]
         all_rms.append(np.sqrt(np.var(rmag1[idx_not_nan])))
@@ -320,14 +325,14 @@ def save_photometry_hs(data, idx, idx_comparison,
         for j in idx_sort_times:
             if (not np.isnan(rmag1[j])) and (not np.isnan(rmag2[j])) and (not np.isnan(rmag3[j])):
                 # Get magnitudes and errors:
-                mag1 = -2.512 * np.log10(d['fluxes_' + str(chosen_aperture) + '_pix_ap'][all_idx][j])
-                mag1_err = (2.512 * d['fluxes_' + str(chosen_aperture) + '_pix_ap_err'][all_idx][j]) / (
+                mag1 = -mag_fact * np.log10(d['fluxes_' + str(chosen_aperture) + '_pix_ap'][all_idx][j])
+                mag1_err = (mag_fact * d['fluxes_' + str(chosen_aperture) + '_pix_ap_err'][all_idx][j]) / (
                             np.log(10.) * d['fluxes_' + str(chosen_aperture) + '_pix_ap'][all_idx][j])
-                mag2 = -2.512 * np.log10(d['fluxes_' + str(min_aperture) + '_pix_ap'][all_idx][j])
-                mag2_err = (2.512 * (d['fluxes_' + str(min_aperture) + '_pix_ap_err'][all_idx][j])) / (
+                mag2 = -mag_fact * np.log10(d['fluxes_' + str(min_aperture) + '_pix_ap'][all_idx][j])
+                mag2_err = (mag_fact * (d['fluxes_' + str(min_aperture) + '_pix_ap_err'][all_idx][j])) / (
                             np.log(10.) * d['fluxes_' + str(min_aperture) + '_pix_ap'][all_idx][j])
-                mag3 = -2.512 * np.log10(d['fluxes_' + str(max_aperture) + '_pix_ap'][all_idx][j])
-                mag3_err = (2.512 * (d['fluxes_' + str(max_aperture) + '_pix_ap_err'][all_idx][j])) / (
+                mag3 = -mag_fact* np.log10(d['fluxes_' + str(max_aperture) + '_pix_ap'][all_idx][j])
+                mag3_err = (mag_fact * (d['fluxes_' + str(max_aperture) + '_pix_ap_err'][all_idx][j])) / (
                             np.log(10.) * d['fluxes_' + str(max_aperture) + '_pix_ap'][all_idx][j])
 
                 if d['fwhm'][all_idx][j] != 0.:
