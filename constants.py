@@ -1,3 +1,4 @@
+import logging
 import os
 from glob import iglob
 
@@ -25,6 +26,13 @@ server_destination = "/Volumes/home/Data"
 
 # STANDARD LIST OF TELESCOPES, UPDATE WHEN NEEDED
 telescopes_list = ["VATT", "BOK", "KUIPER", "SCHULMAN", "CHAT", "CASSINI", "CAHA"]
+
+# Formatting/functions for logging
+FORMAT1 = "%(message)s"
+if not os.path.isdir('/Users/eden/edenAP/EDEN Logging'):
+    os.mkdir('/Users/eden/edenAP/EDEN Logging')
+logging.basicConfig(filename='/Users/eden/edenAP/EDEN Logging/EDEN_Util.log', format=FORMAT1, level=logging.INFO)
+log = logging.info
 
 
 # Server localizers
