@@ -18,9 +18,11 @@ telescopes_list = ["VATT", "BOK", "KUIPER", "SCHULMAN", "CHAT", "CASSINI", "CAHA
 
 # Formatting/functions for logging
 FORMAT1 = "%(message)s"
-if not os.path.isdir('/Users/eden/edenAP/EDEN Logging'):
-    os.mkdir('/Users/eden/edenAP/EDEN Logging')
-logging.basicConfig(filename='/Users/eden/edenAP/EDEN Logging/EDEN_Util.log', format=FORMAT1, level=logging.INFO)
+edenAP_path = os.path.abspath(os.path.dirname(__file__))
+log_folder = os.path.join(edenAP_path, 'EDEN Logging')
+if not os.path.isdir(log_folder):
+    os.mkdir(log_folder)
+logging.basicConfig(filename=os.path.join(log_folder, 'edenAP.log'), format=FORMAT1, level=logging.INFO)
 log = logging.info
 
 
