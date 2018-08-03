@@ -8,6 +8,7 @@ import smtplib
 import subprocess
 import sys
 import urllib
+from configparser import ConfigParser
 from datetime import datetime
 from email import encoders
 from email.mime.audio import MIMEAudio
@@ -20,9 +21,19 @@ import numpy as np
 import requests
 
 import PhotUtils
-from constants import emailsender, emailsender_pwd, emailreceiver, ASTROMETRY, GF_ASTROMETRY
-from constants import get_target_dates, get_telescopes, getjd
-from constants import server_destination, SEND_EMAIL, REF_CENTERS
+from constants import get_target_dates, get_telescopes, getjd, log
+
+# define constants from config.ini
+config = ConfigParser()
+config.read('config.ini')
+server_destination = config['FOLDER OPTIONS']['server_destination']
+ASTROMETRY = config['PHOTOMETRY OPTIONS'].getboolean('ASTROMETRY')
+GF_ASTROMETRY = config['PHOTOMETRY OPTIONS'].getboolean('GFASTROMETRY')
+REF_CENTERS = config['PHOTOMETRY OPTIONS'].getboolean('REF_CENTERS')
+SEND_EMAIL = config['USER OPTIONS'].getboolean('SENDEMAIL')
+emailsender = config['USER OPTIONS']['EMAILSENDER']
+emailsender_pwd = config['USER OPTIONS']['EMAILSENDER_PASSWORD']
+emailreceiver = config['USER OPTIONS']['EMAILRECEIVER']
 
 
 ########################################################################
@@ -214,7 +225,7 @@ if data_folder is None:
     print("Telescope doesn't exist in server")
     exit(-1)
 
-emails_to_send = emailreceiver  # ['nestor.espinozap@gmail.com','daniel.bayliss01@gmail.com','andres.jordan@gmail.com']
+emails_to_send = emailreceiver.split(',')  # list of emails to send to
 dates_cal = get_target_dates(telescope=telescope)
 
 red_folder = os.path.join(data_folder, 'red')
@@ -306,15 +317,18 @@ for date in dates_cal:
                     code = 'python transit_photometry.py -telescope ' + telescope + ' -datafolder ' + \
                            date + ' -target_name "' + target_name + '" -band "' + band + \
                            '" -ra " ' + RA + '" -dec " ' + DEC + '" -ncomp 10 --force_aperture -forced_aperture ' + ap + ' --autosaveLC'
-                print(code)
+                log('Executing transit_photometry: %s' % code)
                 p = subprocess.Popen(code, stderr=subprocess.PIPE, stdout=subprocess.PIPE, shell=True)
+                for c in iter(lambda: p.stdout.read(1), b''):
+                    sys.stdout.write(c.decode())
                 p.wait()
+                out, err = p.communicate()
+                # print(out.decode())
                 if p.returncode != 0 and p.returncode != None:
                     print('\t Transit Photometry FAILED. The error was:')
-                    out, err = p.communicate()
                     print(err)
-                    print('\n\t Exiting...\n')
-                    sys.exit()
+                    print('\n\t Skipping it...\n')
+                    # sys.exit()
                 os.path.join(data_folder, 'red', '*', '*', target, '*')
                 out = sorted(glob.glob(os.path.join(data_folder, 'red', '*', '*', target, '*')))
                 #                 for ii in range(len(out)):
