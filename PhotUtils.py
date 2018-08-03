@@ -1,4 +1,3 @@
-import decimal
 import multiprocessing as mp
 import os
 import re
@@ -6,6 +5,7 @@ import subprocess
 import sys
 import time as clocking_time
 import warnings
+from configparser import ConfigParser
 from math import modf
 
 # Use for UTC -> BJD conversion:
@@ -14,7 +14,6 @@ import dateutil
 import ephem as E
 import jdcal
 import matplotlib
-import matplotlib.dates as mdates
 import numpy as np
 from astropy import _erfa as erfa
 from astropy import constants as const
@@ -39,7 +38,15 @@ from scipy.ndimage.filters import gaussian_filter
 # Force matplotlib to not use any Xwindows backend.
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from constants import server_destination, fpack_folder, astrometry_folder
+from constants import log, natural_keys, LOOKDATE
+
+# define constants from config.ini
+config = ConfigParser()
+config.read('config.ini')
+server_destination = config['FOLDER OPTIONS']['server_destination']
+fpack_folder = config['FOLDER OPTIONS']['funpack']
+astrometry_folder = config['FOLDER OPTIONS']['astrometry']
+manual_object_coords = config['Manual Coords']
 
 # Ignore computation errors:
 np.seterr(divide='ignore', invalid='ignore')
@@ -49,6 +56,9 @@ plt.style.use('ggplot')
 
 # Default limit of rows is 500. Go for infinity and beyond!
 Irsa.ROW_LIMIT = np.inf
+
+# mean sidereal rate (at J2000) in radians per (UT1) second
+SR = 7.292115855306589e-5
 
 # Define astrometry source directory:
 astrometry_directory = astrometry_folder  # '/data/astrometry/bin/'
@@ -135,29 +145,47 @@ def getAirmass(ra, dec, day, longitude, latitude, elevation):
     """
     Get airmass given the RA, DEC of object in sky
     longitude, latitude and elevation of site.
-    :param ra: RA of object either decimal degrees or HMS string
-    :param dec: Dec of object either decimal degrees or DMS string
-    :param day: date time string or object
-    :param longitude: longitude in degrees west of Greenwich
-    :param latitude: longitude in degrees north of the Equator
+    :param ra: RA of object in decimal degrees or string in format HMS
+    :param dec: Dec of object in decimal degrees or string in format DMS
+    :param day: date time string or object; e.g. '2018-05-29 05:20:30.5'
+    :param longitude: longitude in degrees east of Greenwich ( East +, West - )
+    :param latitude: longitude in degrees north of the Equator ( North +, South -)
     :param elevation: Elevation above sea level in meters
     :return: airmass of celestial object
+
+
+    Exampple: Kuiper Telescope    Target: 2MASSI J183579+325954   Airmass: 1.01 (header)
+    >> sitelong = -110.73453
+    >> sitelat = 32.41647
+    >> sitealt = 2510.
+    >> Day = '2018-07-19 05:43:20.411'
+    >> Dec = '+32:59:54.5'
+    >> RA = '18:35:37.92'
+    >> getAirmass(RA, Dec, Day, sitelong, sitelat, sitealt)
+    Out[1]: 1.005368864146983
+
     """
     star = E.FixedBody()
-    star._ra = ra
-    star._dec = dec
+    star._ra = ra if isinstance(ra, str) else ra * E.degree
+    star._dec = dec if isinstance(dec, str) else dec * E.degree
 
     observer = E.Observer()
     observer.date = day
-    observer.long = -1 * E.degree * longitude
+    # convert longitude and latitude to radians with E.degree
+    observer.long = E.degree * longitude
     observer.lat = E.degree * latitude
+
     observer.elevation = elevation
     observer.temp = 7.0
     observer.pressure = 760.0
 
     star.compute(observer)
-    z = np.pi / 2 - star.alt
-    airmass = 1 / np.cos(z)
+    # star.alt: altitude of object in radians
+    # h = altitude of object in degrees
+    # factor is a corrected altitude for more accurate airmass (in radians)
+    h = star.alt * 180 / np.pi
+    factor = h + E.degree * 244. / (165. + 47. * (h ** 1.1))
+    airmass = 1. / np.sin(factor * np.pi / 180.)
     return airmass
 
 
@@ -180,7 +208,7 @@ def get_planet_data(planet_data, target_object_name):
 
 
 def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
-             hdulist, exts, R, catalog=u'fp_psc', date='20180101'):
+             hdulist, exts, R, catalog=u'fp_psc', date=dateutil.parser.parse('20180101')):
     print('\t > Generating master dictionary for coordinates', central_ra, central_dec, '...')
     # Make query to 2MASS:
     result = Irsa.query_region(coord.SkyCoord(central_ra, central_dec, unit=(u.deg, u.deg)),
@@ -206,28 +234,18 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
     all_h = np.array(result['h_m'].data.data.tolist())
     all_h_err = np.array(result['h_msigcom'].data.data.tolist())
     # Correct RA and DECs for PPM. First, get delta T:
-    year = int(date[:4])
-    month = int(date[4:6])
-    day = int(date[6:8])
-    s = str(year) + '.' + str(month) + '.' + str(day)
-    dt = dateutil.parser.parse(s)
-    data_jd = sum(jdcal.gcal2jd(dt.year, dt.month, dt.day))
+    data_jd = sum(jdcal.gcal2jd(date.year, date.month, date.day))
     deltat = (data_jd - 2451544.5) / 365.25
-    print('\t Correcting PPM for date ' + date + ', deltat: ', deltat, '...')
+    print('\t Correcting PPM for date ', date, ', deltat: ', deltat, '...')
     for i in range(len(all_ra)):
         c_ra = all_ra[i]
         c_dec = all_dec[i]
-        # dist_hats = np.sqrt((59.410455-c_ra)**2 + (-25.189964-c_dec)**2)
-        # if dist_hats < 3./3600.:
-        #   print 'Found it!',c_ra,c_dec
         dist = (c_ra - rappmxl) ** 2 + (c_dec - decppmxl) ** 2
         min_idx = np.where(dist == np.min(dist))[0]
         # 3 arcsec tolerance:
         if dist[min_idx] < 3. / 3600.:
             all_ra[i] = all_ra[i] + deltat * rappm[min_idx]
             all_dec[i] = all_dec[i] + deltat * decppm[min_idx]
-            # if dist_hats < 3./3600.:
-            #    print 'New RA DEC:',all_ra[i],all_dec[i]
     print('\t Done.')
 
     # Check which ras and decs have valid coordinates inside the first image...
@@ -246,6 +264,7 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
                 all_extensions = np.append(all_extensions, ext)
     assert len(idx) > 0, "Indeces list for reference stars could now be generated while creating MasterDict"
     # Create dictionary that will save all the data:
+    log('CREATING DICTIONARY FOR THE FIRST TIME. CREATING KEYS')
     master_dict = {}
     master_dict['frame_name'] = np.array([])
     master_dict['UTC_times'] = np.array([])
@@ -274,8 +293,6 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
     # Get index of target star:
     distances = (all_ra[idx] - ra_obj) ** 2 + (all_dec[idx] - dec_obj) ** 2
     target_idx = np.argmin(distances)
-    # distances = np.sqrt((all_ra[idx]-ra_obj)**2 + (all_dec[idx]-dec_obj)**2)
-    # target_idx = np.where(distances == np.min(distances))[0]
 
     for i in range(len(idx)):
         if i != target_idx:
@@ -289,12 +306,6 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
             master_dict['data']['DEC_degs'][i] = dec_deg
             master_dict['data']['RA_coords'][i] = ra_str
             master_dict['data']['DEC_coords'][i] = dec_str
-            # try:
-            #    master_dict['data']['RA_degs'][i],master_dict['data']['DEC_degs'][i] = ra_obj,dec_obj
-            # except:
-            #    master_dict['data']['RA_degs'][i],master_dict['data']['DEC_degs'][i] = ra_obj[0],dec_obj[0]
-            # master_dict['data']['RA_coords'][i],master_dict['data']['DEC_coords'][i] = DecimalToCoords(ra_obj,dec_obj)
-            # master_dict['data']['RA_degs'][i],master_dict['data']['DEC_degs'][i] = CoordsToDecimal([['00:34:47.32','04:39:27.93']])
         master_dict['data'][all_names[i]] = {}
         master_dict['data'][all_names[i]]['centroids_x'] = np.array([])
         master_dict['data'][all_names[i]]['centroids_y'] = np.array([])
@@ -310,8 +321,8 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
     return master_dict
 
 
-def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_folder, use_filter, \
-                  get_astrometry=True, sitelong=None, sitelat=None, sitealt=None, refine_cen=False, \
+def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_folder, use_filter,
+                  get_astrometry=True, sitelong=None, sitelat=None, sitealt=None, refine_cen=False,
                   master_dict=None, gf_opt=False):
     # Define radius in which to search for targets (in degrees):
     search_radius = 0.25
@@ -330,12 +341,10 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         lat_h_name = 'SITELAT'
         alt_h_name = 'SITEALT'
         exptime_h_name = 'EXPTIME'
-        airmass_h_name = 'AIRMASS'
         lst_h_name = None
         t_scale_low = 0.4
         t_scale_high = 0.45
         egain = 2.3
-        times_method = 1
 
     elif telescope == 'CHAT':
         filter_h_name = 'FILTERS'
@@ -343,12 +352,10 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         lat_h_name = 'SITELAT'
         alt_h_name = 'SITEALT'
         exptime_h_name = 'EXPTIME'
-        airmass_h_name = 'Z'
         lst_h_name = 'LST'
         t_scale_low = 0.6
         t_scale_high = 0.65
         egain = 1.0
-        times_method = 3
 
     elif telescope == 'LCOGT':
         # This data is good for LCOGT 1m.
@@ -357,12 +364,10 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         lat_h_name = 'LATITUDE'
         alt_h_name = 'HEIGHT'
         exptime_h_name = 'EXPTIME'
-        airmass_h_name = 'AIRMASS'
         lst_h_name = 'LST'
         t_scale_low = 0.3
         t_scale_high = 0.5
         egain = 'GAIN'
-        times_method = 2
 
     elif telescope == 'SMARTS':
         filter_h_name = 'CCDFLTID'
@@ -370,12 +375,10 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         lat_h_name = 'LATITUDE'
         alt_h_name = 'ALTITIDE'
         exptime_h_name = 'EXPTIME'
-        airmass_h_name = 'SECZ'
         lst_h_name = 'ST'
         t_scale_low = 0.1
         t_scale_high = 0.4
         egain = 3.2
-        times_method = 2
 
     elif telescope == 'OBSUC':
         filter_h_name = 'FILTER'
@@ -386,12 +389,10 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         lat_h_name = None
         alt_h_name = None
         exptime_h_name = 'EXPTIME'
-        airmass_h_name = None
         lst_h_name = None
         t_scale_low = 0.2
         t_scale_high = 0.8
         egain = 'EGAIN'
-        times_method = 2
 
     elif telescope == 'NTT':
         filter_h_name = 'HIERARCH ESO INS FILT1 NAME'
@@ -399,12 +400,10 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         lat_h_name = 'HIERARCH ESO TEL GEOLAT'
         alt_h_name = 'HIERARCH ESO TEL GEOELEV'
         exptime_h_name = 'HIERARCH ESO DET WIN1 DIT1'
-        airmass_h_name = 'HIERARCH ESO TEL AIRM START'
         lst_h_name = None
         t_scale_low = 0.2
         t_scale_high = 0.8
         egain = 'HIERARCH ESO DET OUT1 GAIN'
-        times_method = 2
 
     elif telescope == 'KUIPER':
         filter_h_name = 'FILTER'
@@ -415,12 +414,10 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         sitelat = 32.41647
         sitealt = 2510.
         exptime_h_name = 'EXPTIME'
-        airmass_h_name = 'AIRMASS'
         lst_h_name = 'LST-OBS'
         t_scale_low = 0.145
         t_scale_high = 0.145 * 4
         egain = 3.173
-        times_method = 3
 
     elif telescope == 'SCHULMAN':
         filter_h_name = 'FILTER'
@@ -428,12 +425,10 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         lat_h_name = 'LAT-OBS'
         alt_h_name = 'ALT-OBS'
         exptime_h_name = 'EXPTIME'
-        airmass_h_name = 'AIRMASS'
         lst_h_name = 'ST'
         t_scale_low = 0.32
         t_scale_high = 0.32 * 3
         egain = 1.28
-        times_method = 2
 
     elif telescope == 'VATT':
         filter_h_name = 'FILTER'
@@ -444,12 +439,10 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         sitelat = 32.701303
         sitealt = 3191.
         exptime_h_name = 'EXPTIME'
-        airmass_h_name = 'AIRMASS'
         lst_h_name = 'ST'
-        t_scale_low = 0.188
+        t_scale_low = 0.185
         t_scale_high = 0.188 * 4
         egain = 1.9  # 'DETGAIN'
-        times_method = 3
 
     elif telescope == 'BOK':
         filter_h_name = 'FILTER'
@@ -460,12 +453,10 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         sitelat = 31.98
         sitealt = 2120.
         exptime_h_name = 'EXPTIME'
-        airmass_h_name = 'AIRMASS'
         lst_h_name = 'ST'
         t_scale_low = 0.1
         t_scale_high = 0.4 * 4
         egain = 1.5
-        times_method = 3
     elif telescope == 'CASSINI':
         filter_h_name = 'FILTERS'
         long_h_name = None
@@ -475,12 +466,10 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         sitelat = 44.3
         sitealt = 785.
         exptime_h_name = 'EXPTIME'
-        airmass_h_name = 'AIRMASS'
         lst_h_name = 'ST'
-        t_scale_low = 0.58
+        t_scale_low = 0.55
         t_scale_high = 0.58 * 3
-        egain = 1.28
-        times_method = 3
+        egain = 2.22
     elif telescope == 'CAHA':
         filter_h_name = 'FILTER'
         long_h_name = None
@@ -490,26 +479,38 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         sitelat = 37.2
         sitealt = 2168.
         exptime_h_name = 'EXPTIME'
-        airmass_h_name = 'AIRMASS'
         lst_h_name = 'LST'
-        t_scale_low = 0.3132
+        t_scale_low = 0.313
         t_scale_high = 0.3132 * 3
         egain = 'GAIN'
-        times_method = 2
+    elif telescope == 'GUFI':
+        filter_h_name = 'FILTER'
+        long_h_name = None
+        lat_h_name = None
+        alt_h_name = None
+        sitelong = -109.892014
+        sitelat = 32.701303
+        sitealt = 3191.
+        exptime_h_name = 'EXPTIME'
+        lst_h_name = None
+        t_scale_low = 0.3132  # wrong
+        t_scale_high = 0.3132 * 3  # wrong
+        egain = 'GAIN'
     else:
-        print('ERROR: the selected telescope ' + telescope + ' is not supported.')
+        print('ERROR: the selected telescope %s is not supported.' % telescope)
         sys.exit()
 
     # Iterate through the files:
     first_time = True
     # print('reach iteration through the files')
     for f in filenames:
+        # print('iterating through files')
         # Decompress file. Necessary because Astrometry cant handle this:
         if f[-7:] == 'fits.fz':
             p = subprocess.Popen(fpack_folder + 'funpack ' + f, stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE, shell=True)
             p.wait()
-            if (p.returncode != 0 and p.returncode != None):
+            if p.returncode != 0 and p.returncode != None:
                 print('\t Funpack command failed. The error was:')
                 out, err = p.communicate()
                 print(err)
@@ -523,9 +524,9 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         except:
             print('\t Encountered error opening {:}'.format(f))
             fitsok = False
-
         # If frame already reduced, skip it:
         if updating_dict:
+            log('UPDATING DICTIONARY; updating_dic == True')
             if f in master_dict['frame_name']:
                 fitsok = False
         if fitsok:
@@ -559,8 +560,7 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
                 if not os.path.exists(wcs_filepath) and get_astrometry:
                     print('\t Calculating astrometry...')
                     run_astrometry(f, ra=ra_obj[0], dec=dec_obj[0], radius=0.5,
-                                   scale_low=t_scale_low, scale_high=t_scale_high,
-                                   apply_gaussian_filter=gf_opt)
+                                   scale_low=t_scale_low, scale_high=t_scale_high)
                     print('\t ...done!')
                 # Now get data if astrometry worked...
                 if os.path.exists(wcs_filepath) and get_astrometry:
@@ -576,16 +576,11 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
                     continue
                 # Create master dictionary and define data to be used in the code:    
                 if first_time:
-                    if times_method == 2:
-                        date = ''.join(h0['DATE-OBS'].split('T')[0].split('-'))
-                    else:
-                        date = ''.join(h0['DATE-OBS'].split('-'))
+                    date_time = LOOKDATE(h0).date()  # datetime object
                     central_ra, central_dec = CoordsToDecimal([[h0['RA'], h0['DEC']]])
-                    #                         print (central_ra, central_dec)
-                    #                         print (ra_obj, dec_obj)
                     if not updating_dict:
                         master_dict = get_dict(target, central_ra[0], central_dec[0], search_radius,
-                                               ra_obj, dec_obj, hdulist, exts, R, date=date)
+                                               ra_obj, dec_obj, hdulist, exts, R, date=date_time)
                     else:
                         all_names = master_dict['data']['names']
                         all_data = master_dict['data'].keys()
@@ -606,35 +601,18 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
                         sitelat = h0[lat_h_name]
                     if sitealt is None:
                         sitealt = h0[alt_h_name]
-                    if longitude is None:
-                        # print sitelong,sitelat,sitealt
-                        longitude, latitude, elevation = site_data_2_string(sitelong, sitelat, sitealt)
                     first_time = False
 
                 # Save filename to master dictionary:
-                print(f)
+                log('SETTING A FILENAME TO frame_name key in master_dict\t %s' % f)
                 master_dict['frame_name'] = np.append(master_dict['frame_name'], f)
 
                 ########## OBTAINING THE TIMES OF OBSERVATION ####################
                 # Get the BJD time. First, add exposure time:
-                if times_method == 1:
-                    utc_time = h0['DATE-OBS'] + 'T-' + h0['UT-TIME']
-                elif times_method == 2:
-                    utc_time = h0['DATE-OBS']
-                elif times_method == 3:
-                    utc_time = h0['DATE-OBS'] + 'T-' + h0['TIME-OBS']
+                utc_time = LOOKDATE(h0)
+                t_center = utc_time + dateutil.relativedelta.relativedelta(seconds=h0[exptime_h_name] / 2.)
 
-                # Get time at the center of the observations (initial + exptime/2):
-                t_center = mdates.date2num(dateutil.parser.parse(
-                    utc_time)) + (h0[exptime_h_name] / (2.)) * (1. / (24. * 3600.))
-                # Convert back to string:
-                date = (mdates.num2date(t_center))
-                string_date = date_format(date.year, date.month, date.day,
-                                          date.hour, date.minute, date.second)
-
-                # Prepare object in order to convert this UTC time to BJD time:
-                t = Time(string_date, format='isot', scale='utc',
-                         location=(str(sitelong) + 'd', str(sitelat) + 'd', sitealt))
+                t = Time(t_center, scale='utc', location=(str(sitelong) + 'd', str(sitelat) + 'd', sitealt))
                 try:
                     # the purpose of this is to see if values are floats...therefore degrees
                     float(h0['RA'])
@@ -657,17 +635,13 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
                     mm = c_lst[0]
                     ss = (c_lst[1])[:-1]
                     master_dict['LST'] = np.append(master_dict['LST'], hh + ':' + mm + ':' + ss)
-                if airmass_h_name is not None:
-                    master_dict['airmasses'] = np.append(master_dict['airmasses'], h0[airmass_h_name])
-                else:
-                    year, month, day, hh, mm, ss = getCalDay((t.bcor(coords)).jd)
-                    day = getTime(year, month, day, hh, mm, ss)
-                    master_dict['airmasses'] = np.append(master_dict['airmasses'],
-                                                         getAirmass(central_ra[0], central_dec[0], day, longitude,
-                                                                    latitude, float(elevation)))
-
+                # Calculate Accurate Airmass
+                year, month, day, hh, mm, ss = getCalDay((t.bcor(coords)).jd)
+                day = getTime(year, month, day, hh, mm, ss)
+                master_dict['airmasses'] = np.append(master_dict['airmasses'],
+                                                     getAirmass(central_ra[0], central_dec[0], day, sitelong,
+                                                                sitelat, sitealt))
                 ########## OBTAINING THE FLUXES ###################
-                # master_dict['data']['RA_degs'][223],master_dict['data']['DEC_degs'][223] = 19.4620208,0.3419944
                 for ext in exts:
                     # Load the data:
                     h = hdulist[ext].header
@@ -702,30 +676,42 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
                                                                                                  GAIN=egain,
                                                                                                  saveplot=False,
                                                                                                  refine_centroids=refine_cen)
-                    # print all_names[71]
-                    # print 'Centroids, before:',x[71],y[71]
-                    # print 'Centroids, after :',x_ref[71],y_ref[71]
                     toc = clocking_time.time()
                     print('\t Took {:1.2f} seconds.'.format(toc - tic))
                     # Save everything in the dictionary:
                     for i in range(len(names_ext)):
-                        master_dict['data'][names_ext[i]]['centroids_x'] = np.append(
-                            master_dict['data'][names_ext[i]]['centroids_x'], x_ref[i])
-                        master_dict['data'][names_ext[i]]['centroids_y'] = np.append(
-                            master_dict['data'][names_ext[i]]['centroids_y'], y_ref[i])
-                        master_dict['data'][names_ext[i]]['background'] = np.append(
-                            master_dict['data'][names_ext[i]]['background'], bkg[i])
-                        master_dict['data'][names_ext[i]]['background_err'] = np.append(
-                            master_dict['data'][names_ext[i]]['background_err'], bkg_err[i])
-                        master_dict['data'][names_ext[i]]['fwhm'] = np.append(master_dict['data'][names_ext[i]]['fwhm'],
-                                                                              fwhm[i])
+                        extended_centroidsx = np.append(master_dict['data'][names_ext[i]]['centroids_x'], x_ref[i])
+                        extended_centroidsy = np.append(master_dict['data'][names_ext[i]]['centroids_y'], y_ref[i])
+                        extended_background = np.append(master_dict['data'][names_ext[i]]['background'], bkg[i])
+                        extended_background_err = np.append(master_dict['data'][names_ext[i]]['background_err'],
+                                                            bkg_err[i])
+                        extended_fwhm = np.append(master_dict['data'][names_ext[i]]['fwhm'], fwhm[i])
+
+                        master_dict['data'][names_ext[i]]['centroids_x'] = extended_centroidsx
+                        master_dict['data'][names_ext[i]]['centroids_y'] = extended_centroidsy
+                        master_dict['data'][names_ext[i]]['background'] = extended_background
+                        master_dict['data'][names_ext[i]]['background_err'] = extended_background_err
+                        master_dict['data'][names_ext[i]]['fwhm'] = extended_fwhm
                         for j in range(len(R)):
-                            master_dict['data'][names_ext[i]]['fluxes_' + str(R[j]) + '_pix_ap'] = \
-                                np.append(master_dict['data'][names_ext[i]]['fluxes_' + str(R[j]) + '_pix_ap'],
-                                          fluxes[i, j])
-                            master_dict['data'][names_ext[i]]['fluxes_' + str(R[j]) + '_pix_ap_err'] = \
-                                np.append(master_dict['data'][names_ext[i]]['fluxes_' + str(R[j]) + '_pix_ap_err'],
-                                          errors[i, j])
+                            idx_fluxes = 'fluxes_%d_pix_ap' % R[j]
+                            idx_fluxes_err = 'fluxes_%d_pix_ap_err' % R[j]
+                            this_flux = fluxes[i, j]
+                            this_flux_err = errors[i, j]
+
+                            # quick test for nans
+                            test = np.append(this_flux, this_flux_err)
+                            if np.isnan(np.sum(test)):
+                                log("ALERT: During Saving Aperture Photometry Properties:"
+                                    " Fluxes and Fluxes Err contain NaNs. Details:")
+                                log("names_ext: %s\nidx_fluxes: %s" % (names_ext[i], idx_fluxes))
+
+                            extended_idx_fluxes = np.append(master_dict['data'][names_ext[i]][idx_fluxes], this_flux)
+                            extended_idx_fluxes_err = np.append(master_dict['data'][names_ext[i]][idx_fluxes_err],
+                                                                this_flux_err)
+
+                            master_dict['data'][names_ext[i]][idx_fluxes] = extended_idx_fluxes
+                            master_dict['data'][names_ext[i]][idx_fluxes_err] = extended_idx_fluxes_err
+
     return master_dict
 
 
@@ -854,7 +840,7 @@ def MedianCombine(ImgList, MB=None, flatten_counts=False):
         return np.median(data, axis=2), ronoise, gain
 
 
-def run_astrometry(filename, ra=None, dec=None, radius=None, scale_low=0.1, scale_high=1., apply_gaussian_filter=False):
+def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale_high=1., apply_gaussian_filter=True):
     """
     This code runs Astrometry.net on a frame.
 
@@ -864,147 +850,172 @@ def run_astrometry(filename, ra=None, dec=None, radius=None, scale_low=0.1, scal
 
     * scale_[low, high]:     are scale limits (arcsec/pix) for the image.
     """
+    # flags
+    success = False
+    # server work is a flag to work on Project's directory structure
+    server_work = True if filename.startswith(server_destination) else False
 
+    true_filename = filename
     exts = get_exts(filename)
     print('\t\t Found {:} extensions'.format(len(exts)))
-    # MOD: JOSE. Save gf,wcs,etc files to /red/*/*/*/middle_processing folder    
-    true_filename = filename
-    server_work = False
-    if filename.startswith(server_destination):
-        # the we assume we are working in our current directory structure
-        # of eden project
-        server_work = True
+
+    # setup gf_filepath for gaussian filtered file and final WCS filepath
+    # MOD: JOSE. Save gf,wcs,etc files to /red/*/*/*/middle_processing folder
+    if server_work:
         filename = filename.replace('cal', 'red')
         filename = os.path.join(os.path.dirname(filename), 'middle_processing/', os.path.basename(filename))
-    if apply_gaussian_filter:
-        print('\t\t Applying gaussian filter...')
-        filename = filename.replace('.fits', '_gf.fits')
+        gf_filepath = filename.replace('.fits', '_gf.fits')
+        wcs_filepath = filename.replace('.fits', '.wcs.fits')
+    else:
+        gf_filepath = filename.replace('.fits', '_gf.fits')
+        wcs_filepath = filename.replace('.fits', '.wcs.fits')
+
+    # check if wcs_filepath exists, if so has it been ran by astrometry?
+    isCorrect = False
+    if os.path.isfile(wcs_filepath):
+        with fits.open(wcs_filepath) as hdulist:
+            for comm in hdulist[0].header['COMMENT']:
+                if 'solved_' in comm.lower():
+                    isCorrect = True
+                    break
+
+    if not isCorrect:
+        # Create file to save gaussian filtered fits
+        with fits.open(true_filename) as hdulist:
+            # Overwrite argument is helpful if pipeline failed previously
+            hdulist.writeto(gf_filepath, overwrite=True)
+
+        # variables to check if current file is
+        cal_dir = os.path.dirname(true_filename)
+        current_file = os.path.basename(true_filename)
+        files = sorted(os.listdir(cal_dir), key=natural_keys)
+
+        # sigma of gaussian filter, and astrometry's radius search are increased per loop
+        nsigmas = 5
+        nradii = 5
+        sigmas = np.linspace(1, 10, nsigmas)
+        radii = np.linspace(0.6, 1.2, nradii)
+        log("Starting Astrometry on %s" % true_filename)
+        astrometry_path = os.path.join(astrometry_directory, 'solve-field')
+        for ext in exts:
+            print('\t\t Working on extension {:}...'.format(ext))
+            ext_fname = gf_filepath.replace('.fits', '_' + str(ext) + '.wcs.fits')
+            if (ra is not None) and (dec is not None) and (radius is not None):
+                CODE = '{} --continue --no-plots --downsample 2 --cpulimit 60 --extension "{}" ' \
+                       '--scale-units arcsecperpix --scale-low {} --scale-high {} --ra {} ' \
+                       '--dec {} --radius {} --new-fits "{}" "{}"'.format(astrometry_path, ext, scale_low, scale_high,
+                                                                          ra, dec, 'FIXME', ext_fname, gf_filepath)
+            else:
+                CODE = '{} --continue --no-plots --downsample 2 --cpulimit 60 --extension "{}" ' \
+                       '--scale-units arcsecperpix --scale-low ' \
+                       '{} --scale-high {} --new-fits "{}" "{}"'.format(astrometry_path, ext, scale_low, scale_high,
+                                                                        ext_fname, gf_filepath)
+            # attempt multiple sigmas/radii;
+            count = 0
+            for i in range(nradii):
+                temp_CODE = CODE.replace('FIXME', '%.3f' % radii[i])
+                for j in range(nsigmas):
+                    with fits.open(true_filename) as hdulist:
+                        data = gaussian_filter(hdulist[ext].data, sigmas[j])
+                        fits.update(gf_filepath, data, hdulist[ext].header, ext)
+                    log("Executing Astrometry Code:")
+                    log(temp_CODE)
+                    p = subprocess.Popen(temp_CODE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+                    # for c in iter(lambda: p.stdout.read(1), b''):
+                    #     log(c.decode())
+                    p.wait()
+                    if p.returncode != 0 and p.returncode != None:
+                        print('\t\t ASTROMETRY FAILED. The error was:')
+                        out, err = p.communicate()
+                        print(err)
+                        print('\n\t Exiting...\n')
+                        sys.exit()
+                    count += 1
+                    success = os.path.isfile(ext_fname)
+                    if success:
+                        # if success, save successful parameters to first attempt
+                        sigmas[0] = sigmas[j]
+                        break
+                if success:
+                    # if success, save successful parameters to first attempt in following exts
+                    print("\t\t Astrometry was successful for ext " + str(ext))
+                    log("Astrometry was successful for ext %d" % ext)
+                    radii[0] = radii[i]
+                    break
+            log("Total Number of Attempts: % d" % count)
+            print("\t\t Total Number of Attempts: " + str(count))
+            if not success:
+                log("Astrometry failed for ext %d" % ext)
+                print("\t\t Astronomy failed for ext %d" % ext)
+                print("\t\t Program will attempt to get WCS from latest processed file later.")
+
+        # Astrometry.net is run on individual extensions, which are saved above.
+        # Combining them back into a single file.
         with fits.open(true_filename) as hdulist:
             for ext in exts:
-                hdulist[ext].data = gaussian_filter(hdulist[ext].data, 5)
-            # Overwrite argument is helpful if pipeline failed previously
-            hdulist.writeto(filename, overwrite=True)
-    astrometry_path = os.path.join(astrometry_directory, 'solve-field')
-    for ext in exts:
-        print('\t\t Working on extension {:}...'.format(ext))
-        ext_fname = filename.replace('.fits', '_' + str(ext) + '.wcs.fits')
-        if (ra is not None) and (dec is not None) and (radius is not None):
-            CODE = '{} --continue --no-plots --downsample 2 --cpulimit 60 --extension "{}" ' \
-                   '--scale-units arcsecperpix --scale-low {} --scale-high {} --ra {} ' \
-                   '--dec {} --radius {} --new-fits "{}" "{}"'.format(astrometry_path, ext, scale_low, scale_high,
-                                                                      ra, dec, radius, ext_fname, filename)
-        else:
-            CODE = '{} --continue --no-plots --downsample 2 --cpulimit 60 --extension "{}" ' \
-                   '--scale-units arcsecperpix --scale-low ' \
-                   '{} --scale-high {} --new-fits "{}" "{}"'.format(astrometry_path, ext, scale_low, scale_high,
-                                                                    ext_fname, filename)
-        p = subprocess.Popen(CODE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-        p.wait()
-        if (p.returncode != 0 and p.returncode != None):
-            print('\t ASTROMETRY FAILED. The error was:')
-            out, err = p.communicate()
-            print(err)
-            print('\n\t Exiting...\n')
-            sys.exit()
-        # also check if it actually created a file:
-        success = os.path.isfile(ext_fname)
-        # attempt multiple sigmas/radii; total of 6
-        sigmas = np.linspace(3, 12, 6)
-        radii = np.linspace(0.55, 1, 6)
-        increments = zip(sigmas, radii)
-        template_code = CODE.replace('--radius 0.5', '--radius FIXME')
-        # This while loop was created due to some BOK images failing astrometry
-        # sigma of gaussian filter, and astronometry's radius search are increased per lool
-        for sigma_, radius_ in increments:
-            print('\t\t Re-Applying gaussian filter and adjusting astrometry to refine pointing...')
-            if not apply_gaussian_filter:
-                filename = filename.replace('.fits', '_gf.fits')
-            with fits.open(true_filename) as hdulist:
-                data = gaussian_filter(hdulist[ext].data, sigma_)
+                ext_fname = gf_filepath.replace('.fits', '_' + str(ext) + '.wcs.fits')
+                # Try to save new WCS info in original file
                 try:
-                    fits.update(filename, data, ext)
-                except:
-                    hdulist[ext].data = data
-                    # Overwrite argument is helpful if pipeline failed previously
-                    hdulist.writeto(filename, overwrite=True)
-            temp_CODE = template_code.replace('FIXME', str(radius_))
-            p = subprocess.Popen(temp_CODE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-            p.wait()
-            if (p.returncode != 0 and p.returncode != None):
-                print('\t\tASTROMETRY FAILED. The error was:')
-                out, err = p.communicate()
-                print(err)
-                print('\n\t Exiting...\n')
-                sys.exit()
-            success = os.path.isfile(ext_fname)
-            if success:
-                break
-        if success:
-            print("\t\t Astrometry was successful for ext " + str(ext))
-        else:
-            print("\t\t Re-Applying gaussian and adjusting astrometry failed")
-            print("\t\t Quitting astrometry and skipping file")
-            return 0
-    # Astrometry.net is run on individual extensions, which are saved above.
-    # Combining them back into a single file.
-    with fits.open(true_filename) as hdulist:
-        for ext in exts:
-            ext_fname = filename.replace('.fits', '_' + str(ext) + '.wcs.fits')
-            # Try to save new WCS info in original file
-            try:
-                with fits.open(ext_fname) as hdulist_new:
-                    if ext == 0:
-                        hdulist[0].header = hdulist_new[0].header
-                    else:
-                        hdulist[ext].header = hdulist_new[1].header
-            # If it doesn't work, copy the WCS info from the last file
-            except FileNotFoundError as err:
-                print("\t\t FILE COULDN'T BE FOUND:\n" + str(err))
-                cal_dir = os.path.dirname(true_filename)
-                last_filename = None
-                current_file = os.path.basename(true_filename)
-                files = sorted(os.listdir(cal_dir))
-                # following assumes descending order
-                for i in range(len(files)):
-                    if files[i] == current_file and i != 0:
-                        last_filename = files[i - 1]
-                        break
-                else:
-                    # if there is no previous file, get next file
+                    with fits.open(ext_fname) as hdulist_new:
+                        if ext == 0:
+                            hdulist[0].header = hdulist_new[0].header
+                        else:
+                            hdulist[ext].header = hdulist_new[1].header
+                # If it doesn't work, copy the WCS info from the last file
+                except FileNotFoundError as err:
+                    # print out err
+                    print("\t\t " + str(err))
+
+                    # search adjecent files to see if they have been proccessed...
+                    # this will look for the files before and after the current one
                     for i in range(len(files)):
                         if files[i] == current_file and i != 0:
-                            last_filename = files[i + 1]
+                            last_filename = files[i - 1]
                             break
-                if server_work:
-                    last_wcs_filename = os.path.join(cal_dir, last_filename).replace('.fits', '.wcs.fits')
-                    last_wcs_filename = last_wcs_filename.replace('cal', 'red')
-                    last_wcs_filename = os.path.join(os.path.dirname(last_wcs_filename),
-                                                     'middle_processing/',
-                                                     os.path.basename(last_wcs_filename))
-                else:
-                    last_wcs_filename = os.path.join(cal_dir, last_filename).replace('.fits', '.wcs.fits')
-                    print('\t\t Astrometry failed for extension {:}'.format(ext))
+                    else:
+                        # if there is no previous file, get next file
+                        for i in range(len(files)):
+                            if files[i] == current_file and i != 0:
+                                last_filename = files[i + 1]
+                                break
+                        else:
+                            # if there are no such files... then skip file
+                            log('Quitting astrometry and skipping file')
+                            print("\t\t Quitting astrometry and skipping file")
+                            return 0
+
+                    # fix up file name of latest WCS file
+                    if server_work:
+                        last_wcs_filename = os.path.join(cal_dir, last_filename).replace('.fits', '.wcs.fits')
+                        last_wcs_filename = last_wcs_filename.replace('cal', 'red')
+                        last_wcs_filename = os.path.join(os.path.dirname(last_wcs_filename),
+                                                         'middle_processing/',
+                                                         os.path.basename(last_wcs_filename))
+                    else:
+                        last_wcs_filename = os.path.join(cal_dir, last_filename).replace('.fits', '.wcs.fits')
+
+                    # does it exist?
+                    isFile = os.path.isfile(last_wcs_filename)
+                    if not isFile:
+                        # if reference file doesn't exit, skip this one
+                        # doing this will avoid raising an exception and quitting photometry proccess
+                        return 0
+
+                    # if it exists, then keep going
                     print('\t\t Using WCS info from previous frame {:}'.format(last_wcs_filename))
                     with fits.open(last_wcs_filename) as hdulist_new:
                         if ext == 0:
                             hdulist[ext].header = hdulist_new[ext].header
                         else:
                             hdulist[ext].header = hdulist_new[1].header
-            # If it works, remove the single-extension astrometry file
-            else:
-                os.remove(ext_fname)
-        # Save the original file with the WCS info
-        if server_work:
-            filename_ = true_filename.replace('.fits', '.wcs.fits').replace('cal', 'red')
-            filename_ = os.path.join(os.path.dirname(filename_), 'middle_processing/', os.path.basename(filename_))
-            hdulist.writeto(filename_)
-        else:
-            hdulist.writeto(true_filename.replace('.fits', '.wcs.fits'))
+                # If it works, remove the single-extension astrometry file
+                else:
+                    os.remove(ext_fname)
+            # Save the original file with the WCS info
+            hdulist.writeto(wcs_filepath)
 
-    # Save space by removing the gaussian filtered image, if any
-    # Second condition is not necessary--just a sanity check
-    if apply_gaussian_filter and '_gf.fits' in filename:
-        os.remove(filename)
+        # Save space by removing the gaussian filtered image, if any
+        os.remove(gf_filepath)
 
 
 def SkyToPix(h, ras, decs):
@@ -1242,6 +1253,15 @@ def angle2degree(raw_angle, unit):
 
 
 def CoordsToDecimal(coords):
+    """
+    Function to convert given angles to degree decimals. This function makes big assumptions given the wide variety
+    of formats that EDEN has come across.
+    ASSUMPTION:
+    - if given coordinates are numeric values, then both RA/DEC are given in degrees
+    - if given coordinates are strings/non-numeric values, then RA is given in hour angle and DEC in degrees.
+    :param coords:
+    :return: ras, decs in decimal degrees
+    """
     ras = np.array([])
     decs = np.array([])
     for i in range(len(coords)):
@@ -1256,20 +1276,6 @@ def CoordsToDecimal(coords):
             # it must be a string, and with the following formats
             ras = np.append(ras, angle2degree(raw_RA, u.hourangle))
             decs = np.append(decs, angle2degree(raw_DEC, u.deg))
-        # ra_string, dec_string = coords[i]
-        # # Get hour, minutes and secs from RA string:
-        # hh, mm, ss = ra_string.replace(' ', ':').split(':')
-        # # Convert to decimal:
-        # ra_decimal = np.float(hh) + (np.float(mm) / 60.) + (np.float(ss) / 3600.0)
-        # # Convert to degrees:
-        # ras = np.append(ras, ra_decimal * (360. / 24.))
-        # # Now same thing for DEC:
-        # dd, mm, ss = dec_string.replace(' ', ':').split(':')
-        # dec_decimal = np.abs(np.float(dd)) + (np.float(mm) / 60.) + (np.float(ss) / 3600.0)
-        # if dd[0] == '-':
-        #     decs = np.append(decs, -1 * dec_decimal)
-        # else:
-        #     decs = np.append(decs, dec_decimal)
     return ras, decs
 
 
@@ -1291,17 +1297,24 @@ def DecimalToCoords(ra_degs, dec_degs):
 
 
 def NumToStr(number, roundto=None):
-    if roundto is not None:
-        number = round(decimal.Decimal(str(number)), roundto)
-    abs_number = np.abs(number)
-    if abs_number < 10:
-        str_number = '0' + str(abs_number)
-    else:
-        str_number = str(abs_number)
-    if number < 0:
-        return '-' + str_number
-    else:
-        return str_number
+    """
+    Convert number to string using string formatting.
+    :param number: integer or floating point
+    :param roundto: round to decimal points
+    :return: string formatted value
+    """
+    formatString = '%02d'
+    if isinstance(number, float):
+        if roundto is not None and roundto != 0:
+            # the + 3 is the decimal point and the 2 minimum digit before decimal pt
+            totalDigits = roundto + 4 if number < 0 else roundto + 3
+            formatString = '%0{:d}.{:d}f'.format(totalDigits, roundto)
+        else:
+            number = int(number)
+    if isinstance(number, int):
+        totalDigits = 3 if number < 0 else 2
+        formatString = '%0{:d}d'.format(totalDigits)
+    return formatString % number
 
 
 def SuperComparison(fluxes, errors):
@@ -1310,24 +1323,21 @@ def SuperComparison(fluxes, errors):
     return flux, err_flux
 
 
-# mean sidereal rate (at J2000) in radians per (UT1) second
-SR = 7.292115855306589e-5
-
-''' time class: inherits astropy time object, and adds heliocentric, barycentric
-    correction utilities.'''
-
-
 class Time(time.Time):
+    """
+    time class: inherits astropy time object, and adds heliocentric, barycentric
+        correction utilities.
+    """
 
     def __init__(self, *args, **kwargs):
         super(Time, self).__init__(*args, **kwargs)
         self.height = kwargs.get('height', 0.0)
 
     def _pvobs(self):
-        '''calculates position and velocity of the telescope
-           returns position/velocity in AU and AU/d in GCRS reference frame
-        '''
-
+        """
+        calculates position and velocity of the telescope
+        :return: position/velocity in AU and AU/d in GCRS reference frame
+        """
         # convert obs position from WGS84 (lat long) to ITRF geocentric coords in AU
         xyz = self.location.to(u.AU).value
 
@@ -1516,39 +1526,36 @@ Simbad.add_votable_fields('propermotions')
 def get_general_coords(target, date):
     """
     Given a target name, returns RA and DEC from simbad.
+    :param target: string name of target
+    :param date: date string or datetime object
+    :return:
     """
-    date = date.replace('-', '')
+    if isinstance(date, str):
+        date = date.replace('-', '')
     try:
         # Try to get info from Simbad
-        #         print('\t Getting coordinates for target: {:}'.format(target))
-        target = target.replace('_', ' ')
-        result = Simbad.query_object(target)
-    except:
+        target_fixed = target.replace('_', ' ')
+        log("Querying Simbad Target: %s" % target_fixed)
+        result = Simbad.query_object(target_fixed)
+        if result is None:
+            raise KeyError('Invalid target name in Simbad Query')
+    except KeyError as e:
         # Manually load values
-        coords_file = open('manual_object_coords.dat', 'r')
-        while True:
-            line = coords_file.readline()
-            if line != '':
-                name, ra, dec = line.split()
-                if name.lower() == target.lower():
-                    coords_file.close()
-                    return ra, dec
-            else:
-                break
-        coords_file.close()
-        # As a last resort:
-        return 'NoneFound', 'NoneFound'
+        log(str(e))
+        if target in manual_object_coords:
+            ra, dec = manual_object_coords[target].split(' ')
+            return ra, dec
+        else:
+            # As a last resort:
+            return 'NoneFound', 'NoneFound'
     else:
         # Assuming the Simbad query worked, load the coordinates:
         # Load positions as strings
-        if result is None:
-            print("WARNING: Simbad query for {0} failed!".format(target))
         rahh, ramm, rass = result['RA'][0].split()
         decdd, decmm, decss = result['DEC'][0].split()
         # Load proper motions as arcsec / year
         pmra = result['PMRA'].to(u.arcsec / u.year).value[0]
         pmdec = result['PMDEC'].to(u.arcsec / u.year).value[0]
-        #         print('\t\t proper motion: {:0.3f}, {:0.3f} arcsec/yr'.format(pmra, pmdec))
         # Convert RA and DEC to whole numbers:
         ra = np.double(rahh) + (np.double(ramm) / 60.) + (np.double(rass) / 3600.)
         if np.double(decdd) < 0:
@@ -1556,15 +1563,17 @@ def get_general_coords(target, date):
         else:
             dec = np.double(decdd) + (np.double(decmm) / 60.) + (np.double(decss) / 3600.)
             # Calculate time difference from J2000:
-        year = int(date[:4])
-        month = int(date[4:6])
-        day = int(date[6:8])
-        s = str(year) + '.' + str(month) + '.' + str(day)
-        dt = dateutil.parser.parse(s)
+        if isinstance(date, str):
+            year = int(date[:4])
+            month = int(date[4:6])
+            day = int(date[6:8])
+            s = str(year) + '.' + str(month) + '.' + str(day)
+            dt = dateutil.parser.parse(s)
+        else:
+            dt = date
         data_jd = sum(jdcal.gcal2jd(dt.year, dt.month, dt.day))
         deltat = (data_jd - 2451544.5) / 365.25
         # Calculate total PM:
-        #         pmra = np.double(pmra)*deltat # <- This works for AZ Cnc, LSPM J1403+3007
         pmra = np.double(pmra) * deltat / 15.  # Conversion from arcsec to sec <- This works for GJ 1214, TRAPPIST-1
         pmdec = np.double(pmdec) * deltat
         # Correct proper motion:
