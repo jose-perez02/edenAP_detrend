@@ -568,8 +568,12 @@ inServer = any([telescope.upper() == tel.upper() for tel in get_telescopes()])
 datafolder = os.path.join(server_destination, telescope.upper()) if inServer else None
 
 if datafolder is None:
-    print("Telescope doesn't exist in server")
-    exit(-1)
+    print("Telescope doesn't exist in server, attempting to retrieve from config.ini")
+    if telescope in config['Manual Data Folders']:
+        datafolder = config['Manual Data Folders'][telescope]
+    else:
+        print("No existing folder... Exiting...")
+        exit(-1)
 
 if telescope == 'SWOPE':
     foldername = datafolder + telescope + '/red/' + date + '/' + target_name + '/'

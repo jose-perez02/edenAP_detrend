@@ -3,12 +3,18 @@ import argparse
 import glob
 import os
 import pickle
+from configparser import ConfigParser
 
 import astropy.io.fits as pyfits
 import numpy as np
 
 import PhotUtils
-from constants import server_destination, get_telescopes
+from constants import get_telescopes
+
+# define constants from config.ini
+config = ConfigParser()
+config.read('config.ini')
+server_destination = config['FOLDER OPTIONS']['server_destination']
 
 ###################################################################
 
@@ -49,8 +55,12 @@ inServer = any([telescope.upper() == tel.upper() for tel in get_telescopes()])
 data_folder = os.path.join(server_destination, telescope.upper()) if inServer else None
 
 if data_folder is None:
-    print("Telescope doesn't exist in server")
-    exit(-1)
+    print("Telescope doesn't exist in server, attempting to retrieve from config.ini")
+    if telescope in config['Manual Data Folders']:
+        data_folder = config['Manual Data Folders'][telescope]
+    else:
+        print("No existing folder... Exiting...")
+        exit(-1)
 
 out_cal_folder = os.path.join(data_folder, 'cal')
 out_red_folder = os.path.join(data_folder, 'red')
@@ -65,7 +75,6 @@ gf_opt_astrometry = args.gf_opt_astrometry
 ref_centers = args.ref_centers
 
 ###################################################################
-print('\n')
 print('\t ###################################')
 print('\t Pre-processing....')
 print('\t ###################################')
