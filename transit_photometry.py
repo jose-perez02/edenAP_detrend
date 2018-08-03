@@ -2,6 +2,7 @@
 import argparse
 import os
 import pickle
+from configparser import ConfigParser
 
 import astropy.io.fits as pyfits
 import matplotlib.pyplot as plt
@@ -12,7 +13,11 @@ from matplotlib import ticker
 from scipy.signal import medfilt
 from scipy.stats import linregress
 
-from constants import server_destination, get_telescopes
+from constants import get_telescopes, log
+
+config = ConfigParser()
+config.read('config.ini')
+server_destination = config['FOLDER OPTIONS']['server_destination']
 
 plt.style.use('ggplot')
 
@@ -87,19 +92,30 @@ def get_sigma(data):
 
 
 def check_star(data, idx, min_ap, max_ap, force_aperture, forced_aperture, max_comp_dist=15):
+    """
+
+    :param data: photometry data pickle saved from get_photometry
+    :param idx: index of object
+    :param min_ap:
+    :param max_ap:
+    :param force_aperture:
+    :param forced_aperture:
+    :param max_comp_dist:
+    :return:
+    """
     distances = np.sqrt((data['data']['DEC_degs'][idx] - data['data']['DEC_degs']) ** 2 + \
                         (data['data']['RA_degs'][idx] - data['data']['RA_degs']) ** 2)
     idx_dist = np.argsort(distances)
-    comp_dist = distances[idx_dist[1]]
+    # comp_dist = distances[idx_dist[1]]
     if not force_aperture:
         for chosen_aperture in min_ap, max_ap:
             try:
                 target_flux = data['data']['star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap']
-                target_flux_err = data['data']['star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap_err']
+                # target_flux_err = data['data']['star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap_err']
             except:
                 target_flux = data['data']['target_star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap']
-                target_flux_err = data['data']['target_star_' + str(idx)][
-                    'fluxes_' + str(chosen_aperture) + '_pix_ap_err']
+                # target_flux_err = data['data']['target_star_' + str(idx)][
+                #     'fluxes_' + str(chosen_aperture) + '_pix_ap_err']
         nzero = np.where(target_flux < 0)[0]
         if len(nzero) > 0:
             return False
@@ -107,10 +123,10 @@ def check_star(data, idx, min_ap, max_ap, force_aperture, forced_aperture, max_c
         chosen_aperture = forced_aperture
         try:
             target_flux = data['data']['star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap']
-            target_flux_err = data['data']['star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap_err']
+            # target_flux_err = data['data']['star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap_err']
         except:
             target_flux = data['data']['target_star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap']
-            target_flux_err = data['data']['target_star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap_err']
+            # target_flux_err = data['data']['target_star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap_err']
         nzero = np.where(target_flux < 0)[0]
         if len(nzero) > 0:
             return False
@@ -166,13 +182,32 @@ def super_comparison_detrend(data, idx, idx_comparison, chosen_aperture,
     relative_flux_err = relative_flux * np.sqrt((target_flux_err / target_flux) ** 2 + \
                                                 (super_comp_err / super_comp) ** 2)
     med_rel_flux = np.median(relative_flux)
+    detrend_flux = relative_flux / med_rel_flux
+    detrend_flux_err = relative_flux_err / med_rel_flux
     if supercomp:
-        return relative_flux / med_rel_flux, relative_flux_err / med_rel_flux, super_comp, super_comp_err
-    return relative_flux / med_rel_flux, relative_flux_err / med_rel_flux
+        return detrend_flux, detrend_flux_err, super_comp, super_comp_err
+    return detrend_flux, detrend_flux_err
 
 
 def save_photometry(t, rf, rf_err, output_folder, target_name,
                     plot_data=False, title='', units='Relative Flux'):
+    """
+    Save given relative photometry into plots/files.
+    :param t: times
+    :param rf: relative fluxes
+    :param rf_err: errors of relative fluxes
+    :param output_folder: folder to save all files
+    :param target_name: name of the target object
+    :param plot_data:
+    :param title: Title of the plots
+    :param units: units of the Y axis on plots
+    """
+    log("Saving photometry for target {:s} on {:s} "
+        "using the following:\n\t Times: {}\n\t Fluxes: {}".format(target_name,
+                                                                   output_folder,
+                                                                   str(t).replace('\n', '\n\t'),
+                                                                   str(rf).replace('\n', '\n\t')))
+
     mag_fact = (100. ** .2)
     rf_mag = -mag_fact * np.log10(rf)
     rf_mag_err = rf_err * 2.5 / (np.log(10) * rf)
@@ -189,9 +224,9 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
         # Bin on a 10-min window:
         t_min = np.min(t)
         t_hours = (t - t_min) * 24.
-        bin_width = 10. / 60.  # hr
+        n_bin = 10  # minutes
+        bin_width = n_bin / 60.  # hr
         bins = (t_hours / bin_width).astype('int')
-        n_bin = 10
         times_bins = []
         fluxes_bins = []
         errors_bins = []
@@ -215,7 +250,6 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
         sigma_file.write(sigma_bott)
         sigma_file.close()
         # Make plot
-        fig = plt.figure()
         plt.errorbar(t_hours, rf, rf_err, fmt='o', alpha=0.3, label='Data')
         plt.errorbar(np.array(times_bins), np.array(fluxes_bins), np.array(errors_bins), fmt='o', label='10-min bins')
         plt.annotate(sigma_top, xy=(0.5, 0.10), xycoords='axes fraction', va='bottom', ha='center')
@@ -235,7 +269,7 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
         x_formatter = ticker.ScalarFormatter(useOffset=False)
         plt.gca().xaxis.set_major_formatter(x_formatter)
         plt.legend()
-        plt.savefig(output_folder + target_name + '.pdf')
+        plt.gcf().savefig(output_folder + target_name + '.pdf')
         plt.close()
 
 
@@ -273,7 +307,7 @@ def save_photometry_hs(data, idx, idx_comparison,
         os.mkdir(hs_folder)
 
     # First, write lightcurve in the HS format for each star. First the comparisons:
-    print('Saving data for target and', len(idx_comparison), 'comparison stars')
+    print('\t Saving data for target and', len(idx_comparison), 'comparison stars')
     for i in idx_comparison + [idx]:
         try:
             d = data['data']['star_' + str(i)]
@@ -311,7 +345,7 @@ def save_photometry_hs(data, idx, idx_comparison,
                                                         comp_apertures=comp_apertures, plot_comps=False,
                                                         all_idx=all_idx)
         # (100.**.2) is equal to 2.512
-        mag_fact = (100.**.2)
+        mag_fact = (100. ** .2)
         rmag1 = -mag_fact * np.log10(r_flux1)
         rmag1_err = r_flux_err1 * mag_fact / (np.log(10) * r_flux1)
         rmag2 = -mag_fact * np.log10(r_flux2)
@@ -327,13 +361,13 @@ def save_photometry_hs(data, idx, idx_comparison,
                 # Get magnitudes and errors:
                 mag1 = -mag_fact * np.log10(d['fluxes_' + str(chosen_aperture) + '_pix_ap'][all_idx][j])
                 mag1_err = (mag_fact * d['fluxes_' + str(chosen_aperture) + '_pix_ap_err'][all_idx][j]) / (
-                            np.log(10.) * d['fluxes_' + str(chosen_aperture) + '_pix_ap'][all_idx][j])
+                        np.log(10.) * d['fluxes_' + str(chosen_aperture) + '_pix_ap'][all_idx][j])
                 mag2 = -mag_fact * np.log10(d['fluxes_' + str(min_aperture) + '_pix_ap'][all_idx][j])
                 mag2_err = (mag_fact * (d['fluxes_' + str(min_aperture) + '_pix_ap_err'][all_idx][j])) / (
-                            np.log(10.) * d['fluxes_' + str(min_aperture) + '_pix_ap'][all_idx][j])
-                mag3 = -mag_fact* np.log10(d['fluxes_' + str(max_aperture) + '_pix_ap'][all_idx][j])
+                        np.log(10.) * d['fluxes_' + str(min_aperture) + '_pix_ap'][all_idx][j])
+                mag3 = -mag_fact * np.log10(d['fluxes_' + str(max_aperture) + '_pix_ap'][all_idx][j])
                 mag3_err = (mag_fact * (d['fluxes_' + str(max_aperture) + '_pix_ap_err'][all_idx][j])) / (
-                            np.log(10.) * d['fluxes_' + str(max_aperture) + '_pix_ap'][all_idx][j])
+                        np.log(10.) * d['fluxes_' + str(max_aperture) + '_pix_ap'][all_idx][j])
 
                 if d['fwhm'][all_idx][j] != 0.:
                     FWHM = d['fwhm'][all_idx][j]
@@ -392,7 +426,7 @@ def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap,
             plt.gca().add_artist(circle)
             plt.gca().add_artist(circle2)
             plt.gca().add_artist(circle3)
-            plt.savefig(fname)
+            plt.savefig(fname, dpi=150, bbox_inches='tight')
             plt.close()
             if object_name == 'target':
                 print(frame_name)
@@ -560,7 +594,7 @@ ncomp = int(args.ncomp)
 # Convert target coordinates to degrees:
 target_ra, target_dec = CoordsToDecimal(target_coords)
 
-print('ABOUT TO OPEN PICKLE')
+log('ABOUT TO OPEN PICKLE')
 
 # Open dictionary, save times:
 data = pickle.load(open(os.path.join(foldername, filename), 'rb'))
@@ -616,7 +650,9 @@ for site in sites:
     times = data['BJD_times'][idx_frames]
     idx_sort_times = np.argsort(times)
     cam = (site.split('+')[-1]).split('_')[-1]
-    print('\t Frames:', data['frame_name'][idx_frames])
+    step = len(data['frame_name'][idx_frames]) // 5
+    print('\t Frames Summary: ~',
+          str(data['frame_name'][idx_frames][0:-1:step]).replace('\n', '\n\t\t'))
     # Check which is the aperture that gives a minimum rms:
     if force_aperture:
         print('\t Forced aperture to ', forced_aperture)
@@ -642,7 +678,7 @@ for site in sites:
             mfilt = median_filter(relative_flux[idx_sort_times])
             precision[i] = get_sigma((relative_flux[idx_sort_times] - mfilt) * 1e6)
 
-        idx_max_prec = np.argmin(precision)
+        idx_max_prec = np.nanargmin(precision)
         chosen_aperture = apertures_to_check[idx_max_prec]
         print('\t >> Best precision achieved for target at an aperture of {:} pixels'.format(chosen_aperture))
         print('\t >> Precision achieved: {:.0f} ppm'.format(precision[idx_max_prec]))
@@ -656,14 +692,26 @@ for site in sites:
         idx_frames]
     exptimes = data['exptimes']
     for idx_c in idx_all_comps:
+        log("Checking the correlation between the target and comparison flux")
         # Check the correlation between the target and comparison flux
-        comp_flux = (data['data']['star_' + str(idx_c)]['fluxes_' + str(chosen_aperture) + '_pix_ap'] / exptimes)[
-            idx_frames]
-        comp_flux_err = \
-        (data['data']['star_' + str(idx_c)]['fluxes_' + str(chosen_aperture) + '_pix_ap_err'] / exptimes)[idx_frames]
+        star = 'star_%d' % idx_c
+        flux_ap = 'fluxes_%d_pix_ap' % chosen_aperture
+        flux_ap_err = 'fluxes_%d_pix_ap_err' % chosen_aperture
+        log("For %s using %s" % (star, flux_ap))
+
+        comp_flux = (data['data'][star][flux_ap] / exptimes)[idx_frames]
+        comp_flux_err = (data['data'][star][flux_ap_err] / exptimes)[idx_frames]
         result = linregress(target_flux, comp_flux)
         comp_correlations.append(result.rvalue ** 2)
-    idx_all_comps_sorted = list(np.array(idx_all_comps)[np.argsort(comp_correlations)[::-1]])
+
+    # set NaNs to 0
+    comp_correlations = np.array(comp_correlations)
+    comp_correlations[np.isnan(comp_apertures)] = 0
+
+    comp_corr_idxsorted = np.argsort(comp_correlations)[::-1]
+    comp_corr_sorted = np.array(comp_correlations)[comp_corr_idxsorted]
+    log("Sorted Comparison correlations:\n{:}".format(comp_corr_sorted))
+    idx_all_comps_sorted = list(np.array(idx_all_comps)[comp_corr_idxsorted])
 
     # Selecting optimal number of comparisons, if not pre-set with flag
     if ncomp == 0:
@@ -673,7 +721,6 @@ for site in sites:
             relative_flux, relative_flux_err = super_comparison_detrend(data, idx, idx_all_comps_sorted[0:i + 1],
                                                                         chosen_aperture, all_idx=idx_frames)
             mfilt = median_filter(relative_flux[idx_sort_times])
-            #             prec = get_sigma((relative_flux[idx_sort_times] - mfilt)*1e6)
             prec = np.median(relative_flux_err) * 1e6
             rms_scatter = get_sigma(relative_flux[idx_sort_times] - mfilt) * 1e6
             rel_diff = np.abs(prec - rms_scatter) / prec
@@ -683,8 +730,12 @@ for site in sites:
                 closest_yet = rel_diff
 
     idx_comparison = idx_all_comps_sorted[0:ncomp]
-    print('\t {:} comparison stars available'.format(len(idx_all_comps_sorted)))
-    print('\t Selected the {:} best: {:}'.format(len(idx_comparison), idx_comparison))
+    msg1 = '\t {:} comparison stars available'.format(len(idx_all_comps_sorted))
+    msg2 = '\t Selected the {:} best: {:}'.format(len(idx_comparison), idx_comparison)
+    print(msg1)
+    print(msg2)
+    log(msg1.replace('\t', ''))
+    log(msg2.replace('\t', ''))
 
     # Plot the color-magnitude diagram
     plot_cmd(colors, data, idx, idx_comparison, post_dir)
@@ -695,7 +746,9 @@ for site in sites:
         os.mkdir(post_dir + 'raw_light_curves/')
     if not os.path.exists(post_dir + 'comp_light_curves/'):
         os.mkdir(post_dir + 'comp_light_curves/')
+
     for i_c in idx_comparison:
+        # super detrend each comparison star
         idx_c = np.array(idx_comparison)[np.where(idx_comparison != i_c)]
         if len(idx_c) == 0:
             idx_c = idx_all_comps_sorted[0:10]
@@ -706,7 +759,7 @@ for site in sites:
                 rf_comp, rf_comp_err = super_comparison_detrend(data, i_c, idx_c, aperture, all_idx=idx_frames)
                 mfilt = median_filter(rf_comp[idx_sort_times])
                 precision[i_ap] = get_sigma((rf_comp[idx_sort_times] - mfilt) * 1e6)
-            idx_max_prec = np.argmin(precision)
+            idx_max_prec = np.nanargmin(precision)
             the_aperture = apertures_to_check[idx_max_prec]
             print('\t >> Best precision for star_{:} achieved at an aperture of {:} pixels'.format(i_c, the_aperture))
             print('\t >> Precision achieved: {:.0f} ppm'.format(precision[idx_max_prec]))
@@ -714,10 +767,21 @@ for site in sites:
             the_aperture = chosen_aperture
 
         # Save the raw and detrended light curves
+        comp_star_id = 'star_%d' % i_c
+        comp_fluxes_id = 'fluxes_%d_pix_ap' % the_aperture
+        comp_fluxes_err_id = 'fluxes_%d_pix_ap_err' % the_aperture
+
         exptimes = data['exptimes']
-        comp_flux = (data['data']['star_' + str(i_c)]['fluxes_' + str(the_aperture) + '_pix_ap'] / exptimes)[idx_frames]
-        comp_flux_err = (data['data']['star_' + str(i_c)]['fluxes_' + str(the_aperture) + '_pix_ap_err'] / exptimes)[
-            idx_frames]
+        comp_flux = (data['data'][comp_star_id][comp_fluxes_id] / exptimes)[idx_frames]
+        comp_flux_err = (data['data'][comp_star_id][comp_fluxes_err_id] / exptimes)[idx_frames]
+
+        # detect if comp_flux or comp_flux_err contain NaNs
+        # quick test for nans
+        isNan = np.isnan(np.sum(np.append(comp_flux, comp_flux_err)))
+        if isNan:
+            log("ALERT: Selected Comparison Star's Flux or Flux Err contains NaNs. Details:")
+            log("Star ID: %s\tAperture: %d" % (comp_star_id, the_aperture))
+
         save_photometry(times[idx_sort_times], comp_flux[idx_sort_times], comp_flux_err[idx_sort_times],
                         post_dir + 'raw_light_curves/',
                         target_name='star_{:}_photometry_ap{:}_pix'.format(i_c, the_aperture),
@@ -730,10 +794,17 @@ for site in sites:
         comp_apertures.append(the_aperture)
 
     # Save the raw light curves for the target as well
-    target_flux = (data['data']['target_star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap'] / exptimes)[
-        idx_frames]
+    target_flux = (data['data']['target_star_%d' % idx]['fluxes_%d_pix_ap' % chosen_aperture] / exptimes)[idx_frames]
     target_flux_err = \
-    (data['data']['target_star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap_err'] / exptimes)[idx_frames]
+        (data['data']['target_star_%d' % idx]['fluxes_%d_pix_ap_err' % chosen_aperture] / exptimes)[idx_frames]
+
+    # detect if comp_flux or comp_flux_err contain NaNs
+    # quick test for nans
+    isNan = np.isnan(np.sum(np.append(target_flux, target_flux_err)))
+    if isNan:
+        log("ALERT: Target Star's Flux or Flux Err contains NaNs. Details:")
+        log("Star ID: %d\tAperture: %d" % (idx, chosen_aperture))
+
     save_photometry(times[idx_sort_times], target_flux[idx_sort_times], target_flux_err[idx_sort_times],
                     post_dir + 'raw_light_curves/', target_name='target_photometry_ap{:}_pix'.format(chosen_aperture),
                     plot_data=True, units='Counts')
@@ -748,6 +819,7 @@ for site in sites:
 
     # Saving sub-images
     if plt_images:
+        print('\t Plotting and saving sub-images...')
         plot_images(data, idx, idx_comparison, chosen_aperture, min_ap, max_ap,
                     comp_apertures, post_dir, data['frame_name'][idx_frames],
                     idx_frames, overwrite=overwrite)
@@ -760,19 +832,12 @@ for site in sites:
         plot_comps=all_plots, all_idx=idx_frames)
 
     print('\t Saving...')
-    save_photometry(times[idx_sort_times], relative_flux[idx_sort_times], relative_flux_err[idx_sort_times], \
+    save_photometry(times[idx_sort_times], relative_flux[idx_sort_times], relative_flux_err[idx_sort_times],
                     post_dir, target_name=target_name, plot_data=True,
                     title=target_name + ' on ' + foldername.split('/')[-1] + ' in ' + band + ' at ' + site)
 
-    save_photometry_hs(data, idx, idx_comparison, chosen_aperture, min_ap, max_ap,
-                       comp_apertures, idx_sort_times, post_dir, target_name, band=band, all_idx=idx_frames)
+    save_photometry_hs(data, idx, idx_comparison, chosen_aperture, min_ap, max_ap, comp_apertures,
+                       idx_sort_times, post_dir, target_name, band=band, all_idx=idx_frames)
 
     print('\t Done!\n')
-
-    # Not sure why these files are copied...
-    #     os.makedirs(post_dir+date+'/'+target_name+'/'+band+'/LC/', exist_ok=True)
-    #     src_files = os.listdir(post_dir+'/LC/')
-    #     for file_name in src_files:
-    #         shutil.copy2(os.path.join(post_dir+'LC/',file_name),post_dir+'/'+date+'/'+target_name+'/'+band+'/LC/')
-    #     print ('\t Done!\n')
     plt.clf()
