@@ -185,3 +185,5 @@ To Do
 2. Photometry procedure occasionally give NaN's values in the reference stars light curves. Find out why!
 
 3. In order to evaluate aperture/reference star ranking, it might be useful to include radial plots, FWHM fits plots, etc.
+
+4. Come up with procedure to deal with nearby background stars during photometry procedure and aperture selection.
