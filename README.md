@@ -182,6 +182,6 @@ To Do
 
 1. Ensure bias subtraction, flat-fielding, bad pixel correction, and cosmic ray corrections are applied in pre-processing calibration pipeline
 
-2. Standardize file paths to match the format the team agreed on
+2. Photometry procedure occasionally give NaN's values in the reference stars light curves. Find out why!
 
-3. Adapt to use with: Schulman, Bok, and Kuiper telescopes
+3. In order to evaluate aperture/reference star ranking, it might be useful to include radial plots, FWHM fits plots, etc.
