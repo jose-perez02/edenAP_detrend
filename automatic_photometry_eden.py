@@ -4,6 +4,7 @@ import decimal
 import glob
 import mimetypes
 import os
+import shutil
 import smtplib
 import subprocess
 import sys
@@ -17,6 +18,7 @@ from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+import astropy.config as astropy_config
 import numpy as np
 import requests
 
@@ -34,6 +36,10 @@ SEND_EMAIL = config['USER OPTIONS'].getboolean('SENDEMAIL')
 emailsender = config['USER OPTIONS']['EMAILSENDER']
 emailsender_pwd = config['USER OPTIONS']['EMAILSENDER_PASSWORD']
 emailreceiver = config['USER OPTIONS']['EMAILRECEIVER']
+
+if os.path.exists(astropy_config.get_cache_dir()+'/astroquery/'):
+    # First delete the astropy cache for astroquery; otherwise the data might be out of date!
+    shutil.rmtree(astropy_config.get_cache_dir()+'/astroquery/')
 
 
 ########################################################################
@@ -211,11 +217,14 @@ def NumToStr(number, roundto=None):
 parserIO = argparse.ArgumentParser()
 parserIO.add_argument('-telescope', default=None)
 parserIO.add_argument('-ndays', default=7)
+parserIO.add_argument('--plt_images', dest='plt_images', action='store_true')
+parserIO.set_defaults(plt_images=False)
 args = parserIO.parse_args()
 
 # Get the telescope name:
 telescope = args.telescope
 ndays = int(args.ndays)
+plt_images = args.plt_images
 
 # Check if given telescope is in server, if it is use it, else exit program:
 inServer = any([telescope.upper() == tel.upper() for tel in get_telescopes()])
@@ -321,16 +330,16 @@ for date in dates_cal:
                     code = 'python transit_photometry.py -telescope ' + telescope + ' -datafolder ' + \
                            date + ' -target_name "' + target_name + '" -band "' + band + \
                            '" -ra " ' + RA + '" -dec " ' + DEC + '" -ncomp 10 --force_aperture -forced_aperture ' + ap + ' --autosaveLC'
+                if plt_images:
+                    code += ' --plt_images'
                 log('Executing transit_photometry: %s' % code)
                 p = subprocess.Popen(code, stderr=subprocess.PIPE, stdout=subprocess.PIPE, shell=True)
-                for c in iter(lambda: p.stdout.read(1), b''):
-                    sys.stdout.write(c.decode())
-                p.wait()
+                for line in iter(p.stdout.readline, b''):
+                    sys.stdout.write(line.decode(sys.stdout.encoding))
                 out, err = p.communicate()
-                # print(out.decode())
                 if p.returncode != 0 and p.returncode != None:
                     print('\t Transit Photometry FAILED. The error was:')
-                    print(err)
+                    print(err.decode(sys.stdout.encoding))
                     print('\n\t Skipping it...\n')
                     # sys.exit()
                 os.path.join(data_folder, 'red', '*', '*', target, '*')
@@ -359,7 +368,7 @@ for date in dates_cal:
                     real_camera = 'sinistro'  # from now on, all LCOGT data comes from sinistro cameras
                     imgs = sorted(glob.glob(out_folder + '/target/*'))
                     #                     f = data_folder+'cal/'+date+'/'+(imgs[0].split('/')[-1]).split('.')[0]+'.fits'
-                    #                     d,h = pyfits.getdata(f, header=True)
+                    #                     d,h = fits.getdata(f, header=True)
                     mymail.htmladd('Camera: ' + camera)
                     #                     mymail.htmladd('Observing site: '+h['SITE'])
                     mymail.htmladd('Band: ' + band)
