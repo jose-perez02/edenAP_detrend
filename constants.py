@@ -138,11 +138,16 @@ def LOOKDATE(header):
         if "T" in date:
             temp_date = parser.parse(date)
         else:
-            time = find_val(header, 'UT')
-            if '/' in time or '-' in time:
-                # if 'UT' value suggests date string, then raise err
-                raise KeyError
-            temp_date = parser.parse(date + 'T' + time)
+            try:
+                time = find_val(header, 'UT')
+                if '/' in time or '-' in time or ':' not in time:
+                    # if 'UT' value suggests date string, then raise err
+                    raise KeyError
+                temp_date = parser.parse(date + 'T' + time)
+            except KeyError:
+                time_key = 'TIME-OBS' if 'TIME-OBS' in header else 'TIME'
+                time = find_val(header, time_key)
+                temp_date = parser.parse(date + 'T' + time)
     except (KeyError, TypeError):
         date = find_val(header, 'DATE')
         temp_date = parser.parse(date)
