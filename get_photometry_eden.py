@@ -9,7 +9,7 @@ import astropy.io.fits as pyfits
 import numpy as np
 
 import PhotUtils
-from constants import get_telescopes
+from constants import get_telescopes, find_val, LOOKDATE, log
 
 # define constants from config.ini
 config = ConfigParser()
@@ -32,11 +32,6 @@ parser.add_argument('-apstep', default=1)
 # Run astrometry on the images?
 parser.add_argument('--get_astrometry', dest='get_astrometry', action='store_true')
 parser.set_defaults(get_astrometry=False)
-
-# Generate gaussian-filtered version of the images? (sometimes good for astrometry of 
-# highly defocused targets)
-parser.add_argument('--gf_opt_astrometry', dest='gf_opt_astrometry', action='store_true')
-parser.set_defaults(gf_opt_astrometry=False)
 
 # Refine the centroids of each target?
 parser.add_argument('--ref_centers', dest='ref_centers', action='store_true')
@@ -71,7 +66,6 @@ max_aperture = int(args.maxap)
 aperture_step = int(args.apstep)
 
 get_astrometry = args.get_astrometry
-gf_opt_astrometry = args.gf_opt_astrometry
 ref_centers = args.ref_centers
 
 ###################################################################
@@ -100,7 +94,6 @@ for file in files:
 good_objects = []
 for i in range(len(files)):
     f = files[i]
-    # print f
     try:
         h0 = pyfits.getheader(f)
     except:
@@ -108,22 +101,18 @@ for i in range(len(files)):
         raise
     else:
         target = h0['OBJECT']
-        try:
-            filter = h0['FILTER']
-        except KeyError:
-            filter = h0['FILTERS']
-            if isinstance(filter, (int, float)):
-                filter = h0.comments['FILTERS'].strip('\\').strip('/').strip(' ').upper()
-        obj_name = '{:}_{:}'.format(target, filter)
+        filter = find_val(h0, 'FILTER', typ=str)
+        obj_name = '{:}%%{:}'.format(target, filter)
         object_in_files[i] = obj_name
         if ('bias' in obj_name) or ('flat' in obj_name) or ('dark' in obj_name):
             continue
         if obj_name not in all_objects:
             all_objects.append(obj_name)
-            RA, DEC = PhotUtils.get_general_coords(target, h0['DATE-OBS'])
+            date = LOOKDATE(h0)
+            RA, DEC = PhotUtils.get_general_coords(target, date)
             if RA == 'NoneFound':
-                RA = h0['RA']
-                DEC = h0['DEC']
+                RA = find_val(h0, 'RA')
+                DEC = find_val(h0, 'DEC')
             all_ras.append(RA)
             all_decs.append(DEC)
             out_folder = os.path.join(out_red_folder, datafolder)
@@ -145,7 +134,7 @@ R = np.arange(min_aperture, max_aperture + 1, aperture_step)
 # Get photometry for the objects:
 for i in range(len(all_objects)):
     obj_name = all_objects[i]
-    target, filter = obj_name.split('_')
+    target, filter = obj_name.split('%%')
     print('\t Working on ' + obj_name)
     # out_data_folder = out_red_folder+datafolder+'/'+obj_name+'/'
     out_data_folder = os.path.join(out_red_folder, datafolder)
@@ -159,16 +148,15 @@ for i in range(len(all_objects)):
         master_dict = None
     else:
         print('\t Found photometry.pkl')
-
         master_dict = pickle.load(open(os.path.join(out_data_folder, 'photometry.pkl'), 'rb'))
-
     # Get master dictionary for photometry, saving progress every 10 files:
     n_chunks = np.max([1, int(len(all_files) / 10)])
     chunked_files = np.array_split(all_files, n_chunks)
-    for chunk in chunked_files:
+    for i, chunk in enumerate(chunked_files):
+        log("Looping through chunked files #%d" % (i+1))
         master_dict = PhotUtils.getPhotometry(chunk, target, telescope, R, ra_obj, dec_obj, out_data_folder, filter,
                                               get_astrometry=get_astrometry, refine_cen=ref_centers,
-                                              master_dict=master_dict, gf_opt=gf_opt_astrometry)
+                                              master_dict=master_dict)
         # Save dictionary:
         print('\t Saving photometry at ' + out_data_folder + '...')
         OUT_FILE = open(os.path.join(out_data_folder, 'photometry.pkl'), 'wb')
