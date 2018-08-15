@@ -10,7 +10,6 @@ from math import modf
 
 # Use for UTC -> BJD conversion:
 import dateutil
-# For airmass calculation:
 import ephem as E
 import jdcal
 import matplotlib
@@ -21,10 +20,10 @@ from astropy import coordinates as coord
 from astropy import time
 from astropy import units as u
 from astropy import wcs
-# from astropy.coordinates import Angle
 from astropy.coordinates import SkyCoord, Angle
 from astropy.io import fits
-from astropy.stats import median_absolute_deviation as mad
+from astropy.stats import gaussian_sigma_to_fwhm
+from astropy.stats import sigma_clipped_stats
 from astropy.utils.data import download_file
 from astropy.utils.iers import IERS
 from astropy.utils.iers import IERS_A, IERS_A_URL
@@ -32,20 +31,21 @@ from astroquery.irsa import Irsa
 from astroquery.simbad import Simbad
 from photutils import CircularAperture, aperture_photometry
 from photutils import DAOStarFinder
+from photutils import make_source_mask
 from scipy import optimize
 from scipy.ndimage.filters import gaussian_filter
 
 # Force matplotlib to not use any Xwindows backend.
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from constants import log, natural_keys, LOOKDATE
+from constants import log, natural_keys, LOOKDATE, find_val
 
 # define constants from config.ini
 config = ConfigParser()
 config.read('config.ini')
 server_destination = config['FOLDER OPTIONS']['server_destination']
 fpack_folder = config['FOLDER OPTIONS']['funpack']
-astrometry_folder = config['FOLDER OPTIONS']['astrometry']
+astrometry_directory = config['FOLDER OPTIONS']['astrometry']
 manual_object_coords = config['Manual Coords']
 
 # Ignore computation errors:
@@ -60,10 +60,10 @@ Irsa.ROW_LIMIT = np.inf
 # mean sidereal rate (at J2000) in radians per (UT1) second
 SR = 7.292115855306589e-5
 
-# Define astrometry source directory:
-astrometry_directory = astrometry_folder  # '/data/astrometry/bin/'
+# configure simbad query
+Simbad.add_votable_fields('propermotions')
 
-# some globals
+# define globals
 global_d = 0
 global_h = 0
 global_x = 0
@@ -218,21 +218,21 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
                                   spatial='Cone', radius=central_radius * 3600. * u.arcsec, catalog='ppmxl')
 
     # Get RAs, DECs, and PMs from this last catalog:
-    rappmxl = np.array(resultppm['ra'].data.data.tolist())
-    decppmxl = np.array(resultppm['dec'].data.data.tolist())
-    rappm = np.array(resultppm['pmra'].data.data.tolist())
-    decppm = np.array(resultppm['pmde'].data.data.tolist())
+    rappmxl = resultppm['ra'].data.data
+    decppmxl = resultppm['dec'].data.data
+    rappm = resultppm['pmra'].data.data
+    decppm = resultppm['pmde'].data.data
 
     # Save coordinates, magnitudes and errors on the magnitudes:
-    all_ids = np.array(result['designation'].data.data.tolist()).astype(str)
-    all_ra = np.array(result['ra'].data.data.tolist())
-    all_dec = np.array(result['dec'].data.data.tolist())
-    all_j = np.array(result['j_m'].data.data.tolist())
-    all_j_err = np.array(result['j_msigcom'].data.data.tolist())
-    all_k = np.array(result['k_m'].data.data.tolist())
-    all_k_err = np.array(result['k_msigcom'].data.data.tolist())
-    all_h = np.array(result['h_m'].data.data.tolist())
-    all_h_err = np.array(result['h_msigcom'].data.data.tolist())
+    all_ids = result['designation'].data.data.astype(str)
+    all_ra = result['ra'].data.data
+    all_dec = result['dec'].data.data
+    all_j = result['j_m'].data.data
+    all_j_err = result['j_msigcom'].data.data
+    all_k = result['k_m'].data.data
+    all_k_err = result['k_msigcom'].data.data
+    all_h = result['h_m'].data.data
+    all_h_err = result['h_msigcom'].data.data
     # Correct RA and DECs for PPM. First, get delta T:
     data_jd = sum(jdcal.gcal2jd(date.year, date.month, date.day))
     deltat = (data_jd - 2451544.5) / 365.25
@@ -241,7 +241,7 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
         c_ra = all_ra[i]
         c_dec = all_dec[i]
         dist = (c_ra - rappmxl) ** 2 + (c_dec - decppmxl) ** 2
-        min_idx = np.where(dist == np.min(dist))[0]
+        min_idx = np.argmin(dist)
         # 3 arcsec tolerance:
         if dist[min_idx] < 3. / 3600.:
             all_ra[i] = all_ra[i] + deltat * rappm[min_idx]
@@ -262,7 +262,7 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
             if 0 < x[i] < x_max and 0 < y[i] < y_max:
                 idx.append(i)
                 all_extensions = np.append(all_extensions, ext)
-    assert len(idx) > 0, "Indeces list for reference stars could now be generated while creating MasterDict"
+    assert len(idx) > 0, "Indeces list for reference stars could not be generated while creating MasterDict"
     # Create dictionary that will save all the data:
     log('CREATING DICTIONARY FOR THE FIRST TIME. CREATING KEYS')
     master_dict = {}
@@ -294,6 +294,8 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
     distances = (all_ra[idx] - ra_obj) ** 2 + (all_dec[idx] - dec_obj) ** 2
     target_idx = np.argmin(distances)
 
+    # Dictionaries per reference star: centroids_x, centroids_y, background, background_err, fwhm
+    # A fluxes_{aperture}_pix_ap keyword per aperture as well
     for i in range(len(idx)):
         if i != target_idx:
             all_names[i] = 'star_' + str(i)
@@ -321,9 +323,9 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
     return master_dict
 
 
-def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_folder, use_filter,
+def getPhotometry(filenames, target: str, telescope: str, R, ra_obj, dec_obj, out_data_folder, use_filter: str,
                   get_astrometry=True, sitelong=None, sitelat=None, sitealt=None, refine_cen=False,
-                  master_dict=None, gf_opt=False):
+                  master_dict=None):
     # Define radius in which to search for targets (in degrees):
     search_radius = 0.25
 
@@ -336,7 +338,6 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         updating_dict = True
 
     if telescope == 'SWOPE':
-        filter_h_name = 'FILTER'
         long_h_name = 'SITELONG'
         lat_h_name = 'SITELAT'
         alt_h_name = 'SITEALT'
@@ -347,7 +348,6 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         egain = 2.3
 
     elif telescope == 'CHAT':
-        filter_h_name = 'FILTERS'
         long_h_name = 'SITELONG'
         lat_h_name = 'SITELAT'
         alt_h_name = 'SITEALT'
@@ -359,7 +359,6 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
 
     elif telescope == 'LCOGT':
         # This data is good for LCOGT 1m.
-        filter_h_name = 'FILTER'
         long_h_name = 'LONGITUD'
         lat_h_name = 'LATITUDE'
         alt_h_name = 'HEIGHT'
@@ -370,7 +369,6 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         egain = 'GAIN'
 
     elif telescope == 'SMARTS':
-        filter_h_name = 'CCDFLTID'
         long_h_name = 'LONGITUD'
         lat_h_name = 'LATITUDE'
         alt_h_name = 'ALTITIDE'
@@ -381,7 +379,6 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         egain = 3.2
 
     elif telescope == 'OBSUC':
-        filter_h_name = 'FILTER'
         long_h_name = None
         sitelong = 289.4656
         sitelat = -33.2692
@@ -395,7 +392,6 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         egain = 'EGAIN'
 
     elif telescope == 'NTT':
-        filter_h_name = 'HIERARCH ESO INS FILT1 NAME'
         long_h_name = 'HIERARCH ESO TEL GEOLON'
         lat_h_name = 'HIERARCH ESO TEL GEOLAT'
         alt_h_name = 'HIERARCH ESO TEL GEOELEV'
@@ -406,7 +402,6 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         egain = 'HIERARCH ESO DET OUT1 GAIN'
 
     elif telescope == 'KUIPER':
-        filter_h_name = 'FILTER'
         long_h_name = None
         lat_h_name = None
         alt_h_name = None
@@ -420,7 +415,6 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         egain = 3.173
 
     elif telescope == 'SCHULMAN':
-        filter_h_name = 'FILTER'
         long_h_name = 'LONG-OBS'
         lat_h_name = 'LAT-OBS'
         alt_h_name = 'ALT-OBS'
@@ -431,7 +425,6 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         egain = 1.28
 
     elif telescope == 'VATT':
-        filter_h_name = 'FILTER'
         long_h_name = None
         lat_h_name = None
         alt_h_name = None
@@ -445,7 +438,6 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         egain = 1.9  # 'DETGAIN'
 
     elif telescope == 'BOK':
-        filter_h_name = 'FILTER'
         long_h_name = None
         lat_h_name = None
         alt_h_name = None
@@ -458,7 +450,6 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         t_scale_high = 0.4 * 4
         egain = 1.5
     elif telescope == 'CASSINI':
-        filter_h_name = 'FILTERS'
         long_h_name = None
         lat_h_name = None
         alt_h_name = None
@@ -471,7 +462,6 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         t_scale_high = 0.58 * 3
         egain = 2.22
     elif telescope == 'CAHA':
-        filter_h_name = 'FILTER'
         long_h_name = None
         lat_h_name = None
         alt_h_name = None
@@ -480,11 +470,10 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         sitealt = 2168.
         exptime_h_name = 'EXPTIME'
         lst_h_name = 'LST'
-        t_scale_low = 0.313
+        t_scale_low = 0.31
         t_scale_high = 0.3132 * 3
         egain = 'GAIN'
     elif telescope == 'GUFI':
-        filter_h_name = 'FILTER'
         long_h_name = None
         lat_h_name = None
         alt_h_name = None
@@ -495,6 +484,18 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         lst_h_name = None
         t_scale_low = 0.3132  # wrong
         t_scale_high = 0.3132 * 3  # wrong
+        egain = 'GAIN'
+    elif telescope == 'LOT':
+        long_h_name = None
+        lat_h_name = None
+        alt_h_name = None
+        sitelong = 120.873611
+        sitelat = 23.468611
+        sitealt = 2862
+        exptime_h_name = 'EXPTIME'
+        lst_h_name = None
+        t_scale_low = 0.375  # This number wasn't taken from specs, it was a matching value from astrometry
+        t_scale_high = 0.375 * 3
         egain = 'GAIN'
     else:
         print('ERROR: the selected telescope %s is not supported.' % telescope)
@@ -521,12 +522,12 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
         try:
             hdulist = fits.open(f)
             fitsok = True
-        except:
+        except Exception as e:
             print('\t Encountered error opening {:}'.format(f))
+            log(str(e))
             fitsok = False
         # If frame already reduced, skip it:
         if updating_dict:
-            log('UPDATING DICTIONARY; updating_dic == True')
             if f in master_dict['frame_name']:
                 fitsok = False
         if fitsok:
@@ -537,10 +538,10 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
             if use_filter is None:
                 filter_ok = True
             else:
-                cond1 = use_filter == h0[filter_h_name]
-                cond2 = use_filter == h0.comments[filter_h_name].strip('/').strip(' ').upper()
-                if cond1 or cond2:
+                temp_filter: str = find_val(h0, 'FILTER', typ=str)
+                if use_filter.lower() == temp_filter.lower():
                     filter_ok = True
+            log("FILTER_OK: %r\t%s" % (filter_ok, f))
             if filter_ok:
                 print('\t Working on frame ' + f)
                 ########## OBTAINING THE ASTROMETRY ###############
@@ -550,7 +551,7 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
                 if f.startswith(server_destination):
                     wcs_filepath = f.replace('cal', 'red')
                     wcs_filepath = os.path.join(os.path.dirname(wcs_filepath),
-                                                'middle_processing/',
+                                                'wcs_fits/',
                                                 os.path.basename(wcs_filepath))
                     wcs_filepath = wcs_filepath.replace('.fits', '.wcs.fits')
                     if not os.path.exists(os.path.dirname(wcs_filepath)):
@@ -576,13 +577,13 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
                     continue
                 # Create master dictionary and define data to be used in the code:    
                 if first_time:
-                    date_time = LOOKDATE(h0).date()  # datetime object
-                    central_ra, central_dec = CoordsToDecimal([[h0['RA'], h0['DEC']]])
+                    date_time = LOOKDATE(h0)  # datetime object
+                    central_ra, central_dec = CoordsToDecimal([[find_val(h0, 'RA'),
+                                                                find_val(h0, 'DEC')]])
                     if not updating_dict:
                         master_dict = get_dict(target, central_ra[0], central_dec[0], search_radius,
-                                               ra_obj, dec_obj, hdulist, exts, R, date=date_time)
+                                               ra_obj, dec_obj, hdulist, exts, R, date=date_time.date())
                     else:
-                        all_names = master_dict['data']['names']
                         all_data = master_dict['data'].keys()
                         all_names_d = []
                         all_idx = []
@@ -611,16 +612,17 @@ def getPhotometry(filenames, target, telescope, R, ra_obj, dec_obj, out_data_fol
                 # Get the BJD time. First, add exposure time:
                 utc_time = LOOKDATE(h0)
                 t_center = utc_time + dateutil.relativedelta.relativedelta(seconds=h0[exptime_h_name] / 2.)
-
                 t = Time(t_center, scale='utc', location=(str(sitelong) + 'd', str(sitelat) + 'd', sitealt))
+                RA = find_val(h0, 'RA')
+                DEC = find_val(h0, 'DEC')
                 try:
                     # the purpose of this is to see if values are floats...therefore degrees
-                    float(h0['RA'])
-                    coords = SkyCoord(str(h0['RA']) + ' ' + str(h0['DEC']), unit=(u.deg, u.deg))
+                    float(RA)
+                    coords = SkyCoord(str(RA) + ' ' + str(DEC), unit=(u.deg, u.deg))
                 except ValueError:
-                    coords = SkyCoord(h0['RA'] + ' ' + h0['DEC'], unit=(u.hourangle, u.deg))
+                    coords = SkyCoord(RA + ' ' + DEC, unit=(u.hourangle, u.deg))
                 # Save UTC, exposure, JD and BJD and LS times. Save also the airmass:
-                master_dict['UTC_times'] = np.append(master_dict['UTC_times'], utc_time)
+                master_dict['UTC_times'] = np.append(master_dict['UTC_times'], str(utc_time).replace(' ', 'T'))
                 master_dict['exptimes'] = np.append(master_dict['exptimes'], h0[exptime_h_name])
                 master_dict['JD_times'] = np.append(master_dict['JD_times'], t.jd)
                 master_dict['BJD_times'] = np.append(master_dict['BJD_times'], ((t.bcor(coords)).jd))
@@ -840,7 +842,7 @@ def MedianCombine(ImgList, MB=None, flatten_counts=False):
         return np.median(data, axis=2), ronoise, gain
 
 
-def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale_high=1., apply_gaussian_filter=True):
+def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale_high=1.):
     """
     This code runs Astrometry.net on a frame.
 
@@ -860,10 +862,10 @@ def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale
     print('\t\t Found {:} extensions'.format(len(exts)))
 
     # setup gf_filepath for gaussian filtered file and final WCS filepath
-    # MOD: JOSE. Save gf,wcs,etc files to /red/*/*/*/middle_processing folder
+    # MOD: JOSE. Save gf,wcs,etc files to /red/*/*/*/wcs_fits folder
     if server_work:
         filename = filename.replace('cal', 'red')
-        filename = os.path.join(os.path.dirname(filename), 'middle_processing/', os.path.basename(filename))
+        filename = os.path.join(os.path.dirname(filename), 'wcs_fits/', os.path.basename(filename))
         gf_filepath = filename.replace('.fits', '_gf.fits')
         wcs_filepath = filename.replace('.fits', '.wcs.fits')
     else:
@@ -893,7 +895,7 @@ def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale
         # sigma of gaussian filter, and astrometry's radius search are increased per loop
         nsigmas = 5
         nradii = 5
-        sigmas = np.linspace(1, 10, nsigmas)
+        sigmas = np.linspace(0, 10, nsigmas)
         radii = np.linspace(0.6, 1.2, nradii)
         log("Starting Astrometry on %s" % true_filename)
         astrometry_path = os.path.join(astrometry_directory, 'solve-field')
@@ -921,10 +923,8 @@ def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale
                     log("Executing Astrometry Code:")
                     log(temp_CODE)
                     p = subprocess.Popen(temp_CODE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-                    # for c in iter(lambda: p.stdout.read(1), b''):
-                    #     log(c.decode())
                     p.wait()
-                    if p.returncode != 0 and p.returncode != None:
+                    if p.returncode != 0 and p.returncode is not None:
                         print('\t\t ASTROMETRY FAILED. The error was:')
                         out, err = p.communicate()
                         print(err)
@@ -989,7 +989,7 @@ def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale
                         last_wcs_filename = os.path.join(cal_dir, last_filename).replace('.fits', '.wcs.fits')
                         last_wcs_filename = last_wcs_filename.replace('cal', 'red')
                         last_wcs_filename = os.path.join(os.path.dirname(last_wcs_filename),
-                                                         'middle_processing/',
+                                                         'wcs_fits/',
                                                          os.path.basename(last_wcs_filename))
                     else:
                         last_wcs_filename = os.path.join(cal_dir, last_filename).replace('.fits', '.wcs.fits')
@@ -1024,8 +1024,10 @@ def SkyToPix(h, ras, decs):
     header information (h).
     """
     # Load WCS information:
-    #     h['EPOCH'] = float(h['EPOCH'])
-    #     h['EQUINOX'] = float(h['EQUINOX'])
+    if 'EPOCH' in h:
+        h['EPOCH'] = float(h['EPOCH'])
+    if 'EQUINOX' in h:
+        h['EQUINOX'] = float(h['EQUINOX'])
     w = wcs.WCS(h)
     # Generate matrix that will contain sky coordinates:
     sky_coords = np.zeros([len(ras), 2])
@@ -1035,14 +1037,29 @@ def SkyToPix(h, ras, decs):
         sky_coords[i, 1] = decs[i]
     # Get pixel coordinates
     pix_coords = w.wcs_world2pix(sky_coords, 1)
-    #     for i in range(len(pix_coords)):
-    #         print(sky_coords[i], pix_coords[i])
     # Return x,y pixel coordinates:
     return pix_coords[:, 0], pix_coords[:, 1]
 
 
 def getAperturePhotometry(d, h, x, y, R, target_names, frame_name=None, out_dir=None, saveplot=False,
                           refine_centroids=False, half_size=50, GAIN=1.0, ncores=None):
+    """
+    Define/Set global variables for next aperture photometry
+    :param d: image data
+    :param h: image header
+    :param x: x-Coordinate of object in pixels
+    :param y: y-Coordinate of object in pixels
+    :param R: list/array of aperture radii
+    :param target_names:
+    :param frame_name:
+    :param out_dir: output directory for
+    :param saveplot:
+    :param refine_centroids:
+    :param half_size:
+    :param GAIN:
+    :param ncores:
+    :return:
+    """
     global global_d, global_h, global_x, global_y, global_R, global_target_names, global_frame_name, \
         global_out_dir, global_saveplot, global_refine_centroids, global_half_size, global_GAIN
     global_d = d
@@ -1082,29 +1099,39 @@ def getCentroidsAndFluxes(i):
     fluxes_R = np.ones(len(global_R)) * (-1)
     fluxes_err_R = np.ones(len(global_R)) * (-1)
     # Generate a sub-image around the centroid, if centroid is inside the image:
-    if global_x[i] > 0 and global_x[i] < global_d.shape[1] and \
-            global_y[i] > 0 and global_y[i] < global_d.shape[0]:
-        x0 = np.max([0, int(global_x[i]) - global_half_size])
-        x1 = np.min([int(global_x[i]) + global_half_size, global_d.shape[1]])
-        y0 = np.max([0, int(global_y[i]) - global_half_size])
-        y1 = np.min([int(global_y[i]) + global_half_size, global_d.shape[0]])
-        subimg = np.float64(np.copy(global_d[y0:y1, x0:x1]))
-
-        # Substract the (background) median counts, get estimate 
-        # of the sky std dev:
-        background = np.median(subimg)
-        background_sigma = 1.48 * mad(subimg)
-        subimg -= background
-        sky_sigma = np.ones(subimg.shape) * background_sigma
+    if 0 < global_x[i] < global_d.shape[1] and 0 < global_y[i] < global_d.shape[0]:
+        # Reminder (I might need it in case of confusion later) :
+        # x1 and y1 aren't indeces, they're exclusive boundaries
+        # while x0 and y0 are indeces and inclusive boundaries
+        x0 = max(0, int(global_x[i]) - global_half_size)
+        x1 = min(int(global_x[i]) + global_half_size, global_d.shape[1])
+        y0 = max(0, int(global_y[i]) - global_half_size)
+        y1 = min(int(global_y[i]) + global_half_size, global_d.shape[0])
         x_cen = global_x[i] - x0
         y_cen = global_y[i] - y0
-        if global_refine_centroids:
-            # Refine the centroids
-            x_new, y_new = get_refined_centroids(subimg, x_cen, y_cen)
-            if x_new > 0 and x_new < global_d.shape[1] and y_new > 0 and y_new < global_d.shape[0]:
-                x_cen, y_cen = x_new, y_new
+        subimg = global_d[y0:y1, x0:x1].astype(float)
         x_ref = x0 + x_cen
         y_ref = y0 + y_cen
+        if global_refine_centroids:
+            # Refine the centroids, if falls on full image, then redefine subimage to center object
+            x_new, y_new = get_refined_centroids(subimg, x_cen, y_cen)
+            if 0 < x_new < global_d.shape[1] and 0 < y_new < global_d.shape[0]:
+                x_cen, y_cen = int(x_new), int(y_new)
+                x_ref = x0 + x_cen
+                y_ref = y0 + y_cen
+                x0 = max(0, x_ref - global_half_size)
+                x1 = min(x_ref + global_half_size, global_d.shape[1])
+                y0 = max(0, y_ref - global_half_size)
+                y1 = min(y_ref + global_half_size, global_d.shape[0])
+                subimg = global_d[y0:y1, x0:x1].astype(float)
+
+        # Estimate background level: mask out sources, get median of masked image, and noise
+        mask = make_source_mask(subimg, snr=2, npixels=5, dilate_size=11)
+        mean, median, std = sigma_clipped_stats(subimg, sigma=3.0, mask=mask)
+        background = median
+        background_sigma = std
+        subimg -= background
+        sky_sigma = np.ones(subimg.shape) * background_sigma
         # If saveplot is True, save image and the centroid:
         if global_saveplot and ('target' in global_target_names[i]):
             if not os.path.exists(global_out_dir + global_target_names[i]):
@@ -1121,56 +1148,49 @@ def getCentroidsAndFluxes(i):
             plt.close()
         # With the calculated centroids, get aperture photometry:
         for j in range(len(global_R)):
-            fluxes_R[j], fluxes_err_R[j] = getApertureFluxes(subimg, x_cen, y_cen, global_R[j], sky_sigma, global_GAIN)
-        try:
-            fwhm = estimate_fwhm(subimg, x_cen, y_cen)
-        except:
-            fwhm = -1
+            fluxes_R[j], fluxes_err_R[j] = getApertureFluxes(subimg, x_cen, y_cen, global_R[j], sky_sigma)
+        fwhm = estimate_fwhm(subimg, x_cen, y_cen)
         return fluxes_R, fluxes_err_R, x_ref, y_ref, background, background_sigma, fwhm
     else:
         return fluxes_R, fluxes_err_R, global_x[i], global_y[i], 0., 0., 0.
 
 
-def get_refined_centroids(data, x_init, y_init, half_size=15):
+def get_refined_centroids(data, x_init, y_init, half_size=25):
     """
     Refines the centroids by fitting a centroid to the central portion of an image
     Method assumes initial astrometry is accurate within the half_size
     """
     # Take the central portion of the data (i.e., the subimg)
-    x0 = np.max([0, int(x_init) - half_size])
-    x1 = np.min([int(x_init) + half_size, data.shape[1]])
-    y0 = np.max([0, int(y_init) - half_size])
-    y1 = np.min([int(y_init) + half_size, data.shape[0]])
-    x_refined = x_init - x0
-    y_refined = y_init - y0
-    x_guess = x_init - x0
-    y_guess = y_init - y0
-    cen_data = np.float64(np.copy(data[y0:y1, x0:x1]))
+    x0 = max(0, int(x_init) - half_size)
+    x1 = min(int(x_init) + half_size, data.shape[1])
+    y0 = max(0, int(y_init) - half_size)
+    y1 = min(int(y_init) + half_size, data.shape[0])
+    x_guess = x_refined = x_init - x0
+    y_guess = y_refined = y_init - y0
+    cen_data = data[y0:y1, x0:x1].astype(float)
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         sources = DAOStarFinder(threshold=0, fwhm=2.35 * 5).find_stars(gaussian_filter(cen_data, 5))
     xcents = sources['xcentroid']
     ycents = sources['ycentroid']
-    dists = np.sqrt((x_refined - xcents) ** 2 + (y_refined - ycents) ** 2)
+    dists = (x_refined - xcents) ** 2 + (y_refined - ycents) ** 2
     try:
-        idx_min = np.where(dists == np.min(dists))[0]
-        if (len(idx_min) > 1):
-            idx_min = idx_min[0]
-        x_guess = xcents[idx_min][0]
-        y_guess = ycents[idx_min][0]
-    except:
+        idx_min = np.argmin(dists)
+        x_guess = xcents[idx_min]
+        y_guess = ycents[idx_min]
+    except Exception as e:
         print('\t\t DAOStarFinder failed. Refining pointing with a gaussian...')
         try:
             # Robustly fit a gaussian
             p = fit_gaussian(cen_data)
             x_guess = p[1]
             y_guess = p[2]
-        except:
+        except Exception:
             print('\t\t No luck. Resorting to astrometric coordinates.')
     # Don't let the new coordinates stray outside of the sub-image
-    if x_guess < data.shape[0] and x_guess > 0:
+    if data.shape[0] > x_guess > 0:
         x_refined = x_guess
-    if y_guess < data.shape[1] and y_guess > 0:
+    if data.shape[1] > y_guess > 0:
         y_refined = y_guess
     return x_refined + x0, y_refined + y0
 
@@ -1219,26 +1239,21 @@ def estimate_fwhm(data, x0, y0):
 
     def get_second_moment(x, y, mu):
         moment = np.sqrt(np.sum(y * (x - mu) ** 2) / np.sum(y))
-        if not np.isnan(moment):
-            return np.sqrt(np.sum(y * (x - mu) ** 2) / np.sum(y))
-        else:
-            return 0
-
-    sigma_y = get_second_moment(np.arange(data.shape[1]), data[np.int(y0), :], x0)
-    sigma_x = get_second_moment(np.arange(data.shape[0]), data[:, np.int(x0)], y0)
-    if sigma_y == 0.0:
-        sigma = sigma_x
-    if sigma_x == 0.0:
-        sigma = 0.0
-    if sigma_x != 0. and sigma_y != 0.:
-        sigma = (sigma_x + sigma_y) / 2.
-    return 2. * np.sqrt(2. * np.log(2.0)) * sigma
+        return moment
+    # the following two lines might be unnecessary; since data 'should' be centered anyway
+    y0_idx = int(y0) if y0 < data.shape[0] else data.shape[0] - 1
+    x0_idx = int(x0) if x0 < data.shape[1] else data.shape[1] - 1
+    sigma_y = get_second_moment(np.arange(data.shape[1]), data[y0_idx, :], x0)
+    sigma_x = get_second_moment(np.arange(data.shape[0]), data[:, x0_idx], y0)
+    # Context: if sigma_x and sigma_y are not zero or NaN, then average them, else return the one that isn't zero
+    sigma = (sigma_x + sigma_y) / 2. if sigma_x and sigma_y else sigma_y or sigma_x
+    return gaussian_sigma_to_fwhm * sigma
 
 
-def getApertureFluxes(subimg, x_cen, y_cen, Radius, sky_sigma, GAIN):
+def getApertureFluxes(subimg, x_cen, y_cen, Radius, sky_sigma):
     apertures = CircularAperture([(x_cen, y_cen)], r=Radius)
-    rawflux_table = aperture_photometry(subimg, apertures, \
-                                        error=sky_sigma)  # , effective_gain = GAIN)
+    rawflux_table = aperture_photometry(subimg, apertures,
+                                        error=sky_sigma)
     return rawflux_table['aperture_sum'][0], rawflux_table['aperture_sum_err'][0]
 
 
@@ -1431,7 +1446,9 @@ class Time(time.Time):
         return pos, vel
 
     def _obs_pos(self):
-        '''calculates heliocentric and barycentric position of the earth in AU and AU/d'''
+        """
+        calculates heliocentric and barycentric position of the earth in AU and AU/d
+        """
         tdb = self.tdb
 
         # get heliocentric and barycentric position and velocity of Earth
@@ -1460,7 +1477,7 @@ class Time(time.Time):
         b_pos += pos_obs
         h_vel += vel_obs
         b_vel += vel_obs
-        return (h_pos, h_vel, b_pos, b_vel)
+        return h_pos, h_vel, b_pos, b_vel
 
     def _vect(self, coord):
         '''get unit vector pointing to star, and modulus of vector, in AU
@@ -1520,9 +1537,6 @@ def get_exts(filename):
     return exts
 
 
-Simbad.add_votable_fields('propermotions')
-
-
 def get_general_coords(target, date):
     """
     Given a target name, returns RA and DEC from simbad.
@@ -1538,7 +1552,11 @@ def get_general_coords(target, date):
         log("Querying Simbad Target: %s" % target_fixed)
         result = Simbad.query_object(target_fixed)
         if result is None:
+            # result is None when query fails
             raise KeyError('Invalid target name in Simbad Query')
+        else:
+            # print("\t Simbad lookup successful for {:s}!".format(target_fixed))
+            log("Simbad lookup successful for {:s}!".format(target_fixed))
     except KeyError as e:
         # Manually load values
         log(str(e))
@@ -1580,7 +1598,7 @@ def get_general_coords(target, date):
         c_ra = ra + ((pmra) / 3600.)
         c_dec = dec + ((pmdec) / 3600.)
         # Return RA and DEC:
-        ra_hr = int(c_ra)
+        ra_hr = int(c_ra) 
         ra_min = int((c_ra - ra_hr) * 60.)
         ra_sec = (c_ra - ra_hr - ra_min / 60.0) * 3600.
         dec_deg = int(c_dec)
