@@ -30,7 +30,6 @@ config = ConfigParser()
 config.read('config.ini')
 server_destination = config['FOLDER OPTIONS']['server_destination']
 ASTROMETRY = config['PHOTOMETRY OPTIONS'].getboolean('ASTROMETRY')
-GF_ASTROMETRY = config['PHOTOMETRY OPTIONS'].getboolean('GFASTROMETRY')
 REF_CENTERS = config['PHOTOMETRY OPTIONS'].getboolean('REF_CENTERS')
 SEND_EMAIL = config['USER OPTIONS'].getboolean('SENDEMAIL')
 emailsender = config['USER OPTIONS']['EMAILSENDER']
@@ -270,8 +269,6 @@ for date in dates_cal:
         additional_options = ''
         if ASTROMETRY:
             additional_options += ' --get_astrometry'
-        if GF_ASTROMETRY:
-            additional_options += ' --gf_opt_astrometry'
         if REF_CENTERS:
             additional_options += ' --ref_centers'
         # Get a list of all directories for this night, removing the root data_folder+'/cal'
@@ -282,11 +279,9 @@ for date in dates_cal:
             print("Target: {0} | Filter: {1}".format(night.split('/')[0], night.split('/')[1]))
             os.system("python get_photometry_eden.py -telescope {} -datafolder \"{}\" {} ".format(telescope, night,
                                                                                                   additional_options))
-        #         continue # Post-processing algorithm below needs some work
         ########################################################################
 
         # Now, assuming it is done, run the post-processing. First, switch to the post-processing folder:
-        # out_folder = data_folder+'red/'+date+'/'
         out_folder = os.path.join(data_folder, 'red', '*', '*', date)
         target_folders = sorted([folder for folder in glob.glob(out_folder) if '@eaDir' not in folder])
         # First, go through every observed object for the given night:
@@ -298,15 +293,8 @@ for date in dates_cal:
             band = target_folder.split('/')[-2]
             target = '_'.join([target_name, band])
             print('Post-processing target ' + target + ' in folder ' + target_folder)
-            # Try to get coordinates from Simbad or manual_coordinates.dat
-            # splitted_name = target.split('_')
-            # band = splitted_name[-1]
-            # target_name = '_'.join(splitted_name[:-1])
             RA, DEC = PhotUtils.get_general_coords(target_name, date)
-            if RA == 'NoneFound':
-                targetok = False
-            else:
-                targetok = True
+            targetok = False if RA == 'NoneFound' else True
             # If we can't determine RA and DEC, we can't run the post-processing algorithm
             if not targetok:
                 if SEND_EMAIL:
@@ -341,19 +329,6 @@ for date in dates_cal:
                     print('\t Transit Photometry FAILED. The error was:')
                     print(err.decode(sys.stdout.encoding))
                     print('\n\t Skipping it...\n')
-                    # sys.exit()
-                os.path.join(data_folder, 'red', '*', '*', target, '*')
-                out = sorted(glob.glob(os.path.join(data_folder, 'red', '*', '*', target, '*')))
-                #                 for ii in range(len(out)):
-                #                     if out[ii].split('/')[-1] == 'sinistro':
-                #                         out_folder = out[ii]
-                #                         camera = 'sinistro'
-                #                         break
-                #                     elif out[ii].split('/')[-1] == 'sbig':
-                #                         out_folder = out[ii]
-                #                         camera = 'SBIG'
-                #                         break
-                #                 shutil.move(out_folder,out_folder.rstrip('/')+'_'+ap+'/')
                 if SEND_EMAIL:
                     if (p.returncode != 0 and p.returncode != None):
                         print('Error sending mail:')
