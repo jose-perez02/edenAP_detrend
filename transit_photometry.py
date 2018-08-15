@@ -4,12 +4,16 @@ import os
 import pickle
 from configparser import ConfigParser
 
-import astropy.io.fits as pyfits
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from astropy import units as u
 from astropy.coordinates import Angle
+from astropy.io import fits
+from astropy.visualization import ZScaleInterval, ImageNormalize, LinearStretch
 from matplotlib import ticker
+from matplotlib.ticker import AutoMinorLocator
+from mpl_toolkits.mplot3d import art3d
 from scipy.signal import medfilt
 from scipy.stats import linregress
 
@@ -20,6 +24,7 @@ config.read('config.ini')
 server_destination = config['FOLDER OPTIONS']['server_destination']
 
 plt.style.use('ggplot')
+minorLocator = AutoMinorLocator()
 
 
 def angle2degree(raw_angle, unit):
@@ -42,16 +47,21 @@ def CoordsToDecimal(coords, hours=False):
     :return: numeric degree decimals
     """
     if hours:
-        # hh,mm,ss = coords.lstrip(' ').replace(' ', ':').split(':')
-        # decimal = np.float(hh) + (np.float(mm)/60.) + (np.float(ss)/3600.0)
-        # return decimal * (360./24.)
         try:
-            # if coords is a numeric value... else is a string
-            if float(coords):
+            # check if object is iterable; list, array, etc
+            isList = iter(coords)
+            if isinstance(coords[0], str):
+                # it must be a string, and with the following formats
+                return angle2degree(coords, u.hourangle)
+            else:
                 return angle2degree(coords, u.deg)
-        except ValueError:
-            # it must be a string, and with the following formats
-            return angle2degree(coords, u.hourangle)
+        except TypeError:
+            # if coords is a numeric value... else is a string
+            if isinstance(coords, str):
+                # it must be a string, and with the following formats
+                return angle2degree(coords, u.hourangle)
+            else:
+                return angle2degree(coords, u.deg)
 
     ras = np.array([])
     decs = np.array([])
@@ -76,59 +86,43 @@ def get_super_comp(all_comp_fluxes, all_comp_fluxes_err):
     for i in range(all_comp_fluxes.shape[1]):
         data = all_comp_fluxes[:, i]
         data_err = all_comp_fluxes_err[:, i]
-        med_data = np.median(data)
+        med_data = np.nanmedian(data)
         sigma = get_sigma(data)
 
         idx = np.where((data <= med_data + 5 * sigma) & (data >= med_data - 5 * sigma) & \
                        (~np.isnan(data)) & (~np.isnan(data_err)))[0]
-        super_comp[i] = np.median(data[idx])
+        super_comp[i] = np.nanmedian(data[idx])
         super_comp_err[i] = np.sqrt(np.sum(data_err[idx] ** 2) / np.double(len(data_err[idx])))
     return super_comp, super_comp_err
 
 
 def get_sigma(data):
-    mad = np.median(np.abs(data - np.median(data)))
+    """
+    Get median absolute deviation from data
+    :param data: numberical data
+    :return: median absolute deviation
+    """
+    mad = np.nanmedian(np.abs(data - np.nanmedian(data)))
     return mad * 1.4826
 
 
-def check_star(data, idx, min_ap, max_ap, force_aperture, forced_aperture, max_comp_dist=15):
+def check_star(data, idx: int, min_ap: int, max_ap: int, force_aperture: bool, forced_aperture: int):
     """
-
     :param data: photometry data pickle saved from get_photometry
     :param idx: index of object
     :param min_ap:
     :param max_ap:
     :param force_aperture:
     :param forced_aperture:
-    :param max_comp_dist:
     :return:
     """
-    distances = np.sqrt((data['data']['DEC_degs'][idx] - data['data']['DEC_degs']) ** 2 + \
-                        (data['data']['RA_degs'][idx] - data['data']['RA_degs']) ** 2)
-    idx_dist = np.argsort(distances)
-    # comp_dist = distances[idx_dist[1]]
-    if not force_aperture:
-        for chosen_aperture in min_ap, max_ap:
-            try:
-                target_flux = data['data']['star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap']
-                # target_flux_err = data['data']['star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap_err']
-            except:
-                target_flux = data['data']['target_star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap']
-                # target_flux_err = data['data']['target_star_' + str(idx)][
-                #     'fluxes_' + str(chosen_aperture) + '_pix_ap_err']
-        nzero = np.where(target_flux < 0)[0]
-        if len(nzero) > 0:
-            return False
-    else:
-        chosen_aperture = forced_aperture
+    apertures = [forced_aperture] if force_aperture else (min_ap, max_ap)
+    for chosen_aperture in apertures:
         try:
             target_flux = data['data']['star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap']
-            # target_flux_err = data['data']['star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap_err']
-        except:
+        except KeyError:
             target_flux = data['data']['target_star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap']
-            # target_flux_err = data['data']['target_star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap_err']
-        nzero = np.where(target_flux < 0)[0]
-        if len(nzero) > 0:
+        if np.any(target_flux < 0):
             return False
     return True
 
@@ -150,7 +144,7 @@ def super_comparison_detrend(data, idx, idx_comparison, chosen_aperture,
         target_flux_err = data['data']['target_star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap_err'][
             all_idx]
     if plot_comps:
-        plt.plot(target_flux / np.median(target_flux), 'b-')
+        plt.plot(target_flux / np.nanmedian(target_flux), 'b-')
     first_time = True
     for idx_c, comp_aperture in zip(idx_comparison, comp_apertures):
         try:
@@ -161,12 +155,12 @@ def super_comparison_detrend(data, idx, idx_comparison, chosen_aperture,
             comp_flux_err = data['data']['target_star_' + str(idx_c)]['fluxes_' + str(comp_aperture) + '_pix_ap_err'][
                 all_idx]
         if first_time:
-            comp_med = np.median(comp_flux)
+            comp_med = np.nanmedian(comp_flux)
             all_comp_fluxes = comp_flux / comp_med
             all_comp_fluxes_err = comp_flux_err / comp_med
             first_time = False
         else:
-            comp_med = np.median(comp_flux)
+            comp_med = np.nanmedian(comp_flux)
             all_comp_fluxes = np.vstack((all_comp_fluxes, comp_flux / comp_med))
             all_comp_fluxes_err = np.vstack((all_comp_fluxes_err, comp_flux_err / comp_med))
         if plot_comps:
@@ -181,7 +175,7 @@ def super_comparison_detrend(data, idx, idx_comparison, chosen_aperture,
     relative_flux = target_flux / super_comp
     relative_flux_err = relative_flux * np.sqrt((target_flux_err / target_flux) ** 2 + \
                                                 (super_comp_err / super_comp) ** 2)
-    med_rel_flux = np.median(relative_flux)
+    med_rel_flux = np.nanmedian(relative_flux)
     detrend_flux = relative_flux / med_rel_flux
     detrend_flux_err = relative_flux_err / med_rel_flux
     if supercomp:
@@ -202,12 +196,7 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
     :param title: Title of the plots
     :param units: units of the Y axis on plots
     """
-    log("Saving photometry for target {:s} on {:s} "
-        "using the following:\n\t Times: {}\n\t Fluxes: {}".format(target_name,
-                                                                   output_folder,
-                                                                   str(t).replace('\n', '\n\t'),
-                                                                   str(rf).replace('\n', '\n\t')))
-
+    log("Saving photometry for target {:s} on {:s} using the following:".format(target_name, output_folder))
     mag_fact = (100. ** .2)
     rf_mag = -mag_fact * np.log10(rf)
     rf_mag_err = rf_err * 2.5 / (np.log(10) * rf)
@@ -233,12 +222,12 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
         for i_bin in np.unique(bins):
             idx = np.where(bins == i_bin)
             times_bins.append(np.median(t_hours[idx]))
-            fluxes_bins.append(np.median(rf[idx]))
+            fluxes_bins.append(np.nanmedian(rf[idx]))
             errors_bins.append(np.sqrt(np.sum(rf_err[idx] ** 2)) / np.double(len(idx[0])))
 
         # Calculate standard deviation of median filtered data
         mfilt = median_filter(rf)
-        sigma = get_sigma(rf - mfilt) / np.median(rf)
+        sigma = get_sigma(rf - mfilt) / np.nanmedian(rf)
         sigma_mag = -2.5 * np.log10((1. - sigma) / 1.)
         mfilt_bin = median_filter(fluxes_bins)
         sigma_bin = get_sigma(fluxes_bins - mfilt_bin) / np.median(fluxes_bins)
@@ -259,9 +248,9 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
         plt.title(title, fontsize='12')
         plt.xlim(-0.05 * np.ptp(t_hours), 1.05 * np.ptp(t_hours))
         nom_ymin = 0.95
-        data_min = np.max([np.min(rf - 2 * rf_err), np.median(rf - rf_err) - 15 * get_sigma(rf - median_filter(rf))])
+        data_min = np.max([np.min(rf - 2 * rf_err), np.nanmedian(rf - rf_err) - 15 * get_sigma(rf - median_filter(rf))])
         nom_ymax = 1.05
-        data_max = np.min([np.max(rf + 2 * rf_err), np.median(rf + rf_err) + 15 * get_sigma(rf - median_filter(rf))])
+        data_max = np.min([np.max(rf + 2 * rf_err), np.nanmedian(rf + rf_err) + 15 * get_sigma(rf - median_filter(rf))])
         try:
             plt.ylim(data_min, data_max)
         except:
@@ -269,68 +258,202 @@ def save_photometry(t, rf, rf_err, output_folder, target_name,
         x_formatter = ticker.ScalarFormatter(useOffset=False)
         plt.gca().xaxis.set_major_formatter(x_formatter)
         plt.legend()
-        plt.gcf().savefig(output_folder + target_name + '.pdf')
+        plt.gcf().savefig(output_folder + target_name + '.pdf', dpi=150, bbox_inches='tight')
         plt.close()
 
 
+def validateDir(path):
+    if not os.path.isdir(path):
+        os.makedirs(path)
+
+
+def save_trendStats(epdlc_path, output_folder: str, rmag_delta=0.5, mag_delta=0.8, starID=None):
+    # prepare data and some vars for plots
+    if isinstance(epdlc_path, pd.DataFrame):
+        epdlc = epdlc_path
+    else:
+        # else it is assumed is a string (path)
+        epdlc = pd.read_csv(epdlc_path)
+        starID: str = os.path.basename(epdlc_path).split('.')[-2]
+    mean_mag = epdlc['mag1'].mean()
+    airmass_savepath = os.path.join(output_folder, 'airmass_trends', starID + '_Airmass trend.png')
+    fwhm_savepath = os.path.join(output_folder, 'seeing_trends', starID + '_Seeing trend.png')
+    distance_savepath = os.path.join(output_folder, 'distance_trends', starID + '_Distance trend.png')
+    validateDir(output_folder)
+    validateDir(airmass_savepath)
+    validateDir(fwhm_savepath)
+    validateDir(distance_savepath)
+    # calculate distances from median:
+    xdist = abs(epdlc['cen_x'] - epdlc['cen_x'].median())
+    ydist = abs(epdlc['cen_y'] - epdlc['cen_y'].median())
+    epdlc['cen_dist'] = (xdist ** 2 + ydist ** 2) ** 0.5
+    corr = epdlc.corr()
+    # start airmass plots
+    fig, axes = plt.subplots(2, 2, sharex='col')
+    epdlc.plot(x='BJD', y='Z', title='Airmass over time', ax=axes[0, 0])
+    epdlc.plot.scatter(x='BJD', y='mag1', yerr='mag1_err', title='Magnitude over time', ax=axes[1, 0])
+    ax2 = epdlc.plot.scatter(x='Z', y='mag1', yerr='mag1_err', title='Magnitude vs Airmass', ax=axes[1, 1])
+    ax1 = epdlc.plot.scatter(x='Z', y='rmag1', yerr='rmag1_err', title='Relative Magnitude vs Airmass', ax=axes[0, 1])
+    rmag_corr = corr['rmag1'].loc['Z']
+    mag_corr = corr['mag1'].loc['Z']
+    ann = ax1.annotate('Correlation Coeff: %.3f' % rmag_corr, (30, 5), None, 'axes points')
+    ann.set_size(8)
+    ann = ax2.annotate('Correlation Coeff: %.3f' % mag_corr, (30, 5), None, 'axes points')
+    ann.set_size(8)
+    for ax in axes.reshape(axes.size):
+        ax.autoscale(True, axis='both', tight=True)
+    fig.suptitle(starID, y=1.05)
+    plt.tight_layout()
+    axes[0, 1].set_ylim(-rmag_delta, rmag_delta)
+    axes[1, 0].set_ylim(mean_mag - mag_delta, mean_mag + mag_delta)
+    axes[1, 1].set_ylim(mean_mag - mag_delta, mean_mag + mag_delta)
+    fig.savefig(airmass_savepath, dpi=200, bbox_inches='tight')
+    # end airmass plots
+    plt.close()
+    # start seeing plots
+    fig, axes = plt.subplots(2, 2, sharex='col')
+    epdlc.plot.scatter(x='BJD', y='FWHM', title='FWHM over time', ax=axes[0, 0])
+    epdlc.plot.scatter(x='BJD', y='mag1', yerr='mag1_err', title='Magnitude over time', ax=axes[1, 0])
+    ax2 = epdlc.plot.scatter(x='FWHM', y='mag1', yerr='mag1_err', title='Magnitude vs FWHM', ax=axes[1, 1])
+    ax1 = epdlc.plot.scatter(x='FWHM', y='rmag1', yerr='rmag1_err', title='Relative Magnitude vs FWHM', ax=axes[0, 1])
+    rmag_corr = corr['rmag1'].loc['FWHM']
+    mag_corr = corr['mag1'].loc['FWHM']
+    ann = ax1.annotate('Correlation Coeff: %.3f' % rmag_corr, (30, 5), None, 'axes points')
+    ann.set_size(8)
+    ann = ax2.annotate('Correlation Coeff: %.3f' % mag_corr, (30, 5), None, 'axes points')
+    ann.set_size(8)
+    for ax in axes.reshape(axes.size):
+        ax.autoscale(True, axis='both', tight=True)
+    fig.suptitle(starID, y=1.05)
+    plt.tight_layout()
+    axes[0, 1].set_ylim(-rmag_delta, rmag_delta)
+    axes[1, 0].set_ylim(mean_mag - mag_delta, mean_mag + mag_delta)
+    axes[1, 1].set_ylim(mean_mag - mag_delta, mean_mag + mag_delta)
+    fig.savefig(fwhm_savepath, dpi=200, bbox_inches='tight')
+    # end seeing plots
+    plt.close()
+    # start distance plots
+    fig, axes = plt.subplots(2, 2, sharex='col')
+    epdlc.plot(x='BJD', y='cen_dist', title='Distance over time', ax=axes[0, 0])
+    axes[0, 0].set_ylabel('Pixel distance')
+    epdlc.plot.scatter(x='BJD', y='mag1', yerr='mag1_err',
+                       title='Magnitude over time', ax=axes[1, 0])
+    ax2 = epdlc.plot.scatter(x='cen_dist', y='mag1', yerr='mag1_err',
+                             title='Magnitude vs Distance', ax=axes[1, 1])
+    ax1 = epdlc.plot.scatter(x='cen_dist', y='rmag1', yerr='rmag1_err',
+                             title='Relative Magnitude vs Distance', ax=axes[0, 1])
+    axes[1, 1].set_xlabel('Pixel distance')
+    rmag_corr = corr['rmag1'].loc['cen_dist']
+    mag_corr = corr['mag1'].loc['cen_dist']
+    ann = ax1.annotate('Correlation Coeff: %.3f' % rmag_corr, (30, 5), None, 'axes points')
+    ann.set_size(8)
+    ann = ax2.annotate('Correlation Coeff: %.3f' % mag_corr, (30, 5), None, 'axes points')
+    ann.set_size(8)
+    for ax in axes.reshape(axes.size):
+        ax.autoscale(True, axis='both', tight=True)
+    fig.suptitle(starID + '\nDistance: Distance from median center', y=1.1)
+    plt.tight_layout()
+    axes[0, 1].set_ylim(-rmag_delta, rmag_delta)
+    axes[1, 0].set_ylim(mean_mag - mag_delta, mean_mag + mag_delta)
+    axes[1, 1].set_ylim(mean_mag - mag_delta, mean_mag + mag_delta)
+    fig.savefig(distance_savepath, dpi=200, bbox_inches='tight')
+    # end distance plots
+    plt.close()
+
+
+def dataframe2epdlc(table: pd.DataFrame, out_path: str):
+    """
+    Convert dataframe to epdlc file
+    :param table: table that must follow the format in the code
+    :param out_path: complete file path to save epdlc file
+    """
+    # Define literal string with formatting:
+    header = f'#{"frame":<31} {"BJD":<16} {"JD":<16} {"mag1":<8} {"mag1_err":<8} ' \
+             f'{"mag2":<8} {"mag2_err":<8} {"mag3":<8} {"mag3_err":<8} ' \
+             f'{"rmag1":<8} {"rmag1_err":<8} {"rmag2":<8} {"rmag2_err":<8}' \
+             f' {"rmag3":<8} {"rmag3_err":<8} {"cen_x":<8} ' \
+             f'{"cen_y":<8} {"bg":<8} {"bg_err":<8} {"FWHM":<8} ' \
+             f'{"HA":<8} {"ZA":<8} {"Z":<8}\n'
+    row_fmt = '{frame:<32} {BJD:<16.8f} {JD:<16.8f} {mag1:< 8.4f} {mag1_err:<8.4f} ' \
+              '{mag2:< 8.4f} {mag2_err:<8.4f} {mag3:< 8.4f} {mag3_err:<8.4f} ' \
+              '{rmag1:< 8.4f} {rmag1_err:< 8.4f} {rmag2:< 8.4f} {rmag2_err:< 8.4f} ' \
+              '{rmag3:< 8.4f} {rmag3_err:< 8.4f} {cen_x:<8.3f} ' \
+              '{cen_y:<8.3f} {bg:<8.3f} {bg_err:<8.3f} {FWHM:< 8.3f} ' \
+              '{HA:< 8.2f} {ZA:<8.2f} {Z:<8.3f}\n'
+    formatted_rows = [row_fmt.format(**row) for i,row in table.iterrows()]
+    with open(out_path, 'w') as epdlc:
+        epdlc.write(header)
+        epdlc.writelines(formatted_rows)
+
+
 def save_photometry_hs(data, idx, idx_comparison,
-                       chosen_aperture, min_aperture, max_aperture,
-                       comp_apertures, idx_sort_times, output_folder,
-                       target_name, band='i', all_idx=None):
-    # Define string formatting:
-    header_fmt = '#{0:<31} {1:<16} {2:<16} {3:<8} {4:<8} ' + \
-                 '{5:<8} {6:<8} {7:<8} {8:<8} ' + \
-                 '{9:<8} {10:<8} {11:<8} {12:<8} ' + \
-                 '{13:<8} {14:<8} {15:<8} {16:<8} ' + \
-                 '{17:<8} {18:<8} {19:<8}\n'
-    header = header_fmt.format(
-        'frame', 'BJD', 'JD', 'mag1', 'mag1_err',
-        'mag2', 'mag2_err', 'mag3', 'mag3_err',
-        'rmag1', 'rmag2', 'rmag3', 'cen_x',
-        'cen_y', 'bg', 'bg_err', 'FWHM',
-        'HA', 'ZA', 'Z')
-    s = '{0:<32} {1:<16.8f} {2:<16.8f} {3:< 8.4f} {4:<8.4f} ' + \
-        '{5:< 8.4f} {6:<8.4f} {7:< 8.4f} {8:<8.4f} ' + \
-        '{9:< 8.4f} {10:< 8.4f} {11:< 8.4f} {12:<8.3f} ' + \
-        '{13:<8.3f} {14:<8.3f} {15:<8.3f} {16:< 8.3f} ' + \
-        '{17:< 8.2f} {18:<8.2f} {19:<8.3f}\n'
-
-    all_ids = []
-    all_ras = []
-    all_decs = []
-    all_mags = []
-    all_rms = []
-
-    hs_folder = os.path.join(output_folder, 'LC/')
+                       chosen_aperture: int, min_aperture: int, max_aperture: int,
+                       comp_apertures, idx_sort_times, output_folder: str,
+                       target_name: str, band='i', all_idx=None):
+    """
+    Save epdlc files
+    :param data: picke data
+    :param idx: index of main target
+    :param idx_comparison: indeces of comparison stars to detrend
+    :param chosen_aperture: choosen aperture to save
+    :param min_aperture: minimum aperture to save
+    :param max_aperture: maximum aperture to save
+    :param comp_apertures:
+    :param idx_sort_times: indeces of sorted times to use
+    :param output_folder: folder to save all epdlc files
+    :param target_name: name of the main target
+    :param band:
+    :param all_idx:
+    :return:
+    """
+    header = ['frame', 'BJD', 'JD', 'mag1', 'mag1_err', 'mag2', 'mag2_err', 'mag3', 'mag3_err',
+              'rmag1', 'rmag1_err', 'rmag2', 'rmag2_err', 'rmag3', 'rmag3_err', 'cen_x', 'cen_y',
+              'bg', 'bg_err', 'FWHM', 'HA', 'ZA', 'Z']
+    hs_folder = os.path.join(output_folder, 'LC')
+    trends_folder = os.path.join(output_folder, 'trends')
+    other_formats = os.path.join(hs_folder, 'csv_html')
     # Create folder for the outputs in HS format:
     if not os.path.exists(hs_folder):
         os.mkdir(hs_folder)
-
+    # Create folder for the outputs in html format:
+    if not os.path.exists(other_formats):
+        os.mkdir(other_formats)
+    # Create folder for trendStats
+    if not os.path.exists(trends_folder):
+        os.mkdir(trends_folder)
     # First, write lightcurve in the HS format for each star. First the comparisons:
     print('\t Saving data for target and', len(idx_comparison), 'comparison stars')
     for i in idx_comparison + [idx]:
         try:
-            d = data['data']['star_' + str(i)]
-        except:
-            d = data['data']['target_star_' + str(i)]
+            d = data['data']['star_%d' % i]
+        except KeyError:
+            d = data['data']['target_star_%d' % i]
         if i == idx:
             star_name = target_name
         else:
             star_name = str(data['data']['IDs'][i])
+        fluxes_ap = 'fluxes_%d_pix_ap' % chosen_aperture
+        fluxes_min_ap = 'fluxes_%d_pix_ap' % min_aperture
+        fluxes_max_ap = 'fluxes_%d_pix_ap' % max_aperture
+        fluxes_ap_err = 'fluxes_%d_pix_ap_err' % chosen_aperture
+        fluxes_min_ap_err = 'fluxes_%d_pix_ap_err' % min_aperture
+        fluxes_max_ap_err = 'fluxes_%d_pix_ap_err' % max_aperture
+
+        flux = d[fluxes_ap][all_idx][idx_sort_times]
+        flux_min = d[fluxes_min_ap][all_idx][idx_sort_times]
+        flux_max = d[fluxes_max_ap][all_idx][idx_sort_times]
+        flux_err = d[fluxes_ap_err][all_idx][idx_sort_times]
+        flux_min_err = d[fluxes_min_ap_err][all_idx][idx_sort_times]
+        flux_max_err = d[fluxes_max_ap_err][all_idx][idx_sort_times]
+
+        FWHMs = d['fwhm'][all_idx][idx_sort_times]
+        epdlc_path = os.path.join(hs_folder, star_name + '.epdlc')
+        csv_path = os.path.join(other_formats, star_name + '.csv')
+        html_path = os.path.join(other_formats, star_name + '.html')
         ra = data['data']['RA_degs'][i]
-        dec = data['data']['DEC_degs'][i]
-        all_ids.append(star_name)
-        all_ras.append(ra)
-        all_decs.append(dec)
-        all_mags.append(np.median(-2.512 * np.log10(d['fluxes_' + str(chosen_aperture) + '_pix_ap'][all_idx])))
-        mag = data['data']['Jmag'][i]
-        f = open(str(hs_folder + star_name + '.epdlc'), 'w')
-        f.write(header)
+
         #  Get super-comparison detrend for the current star:
-        current_comps = []
-        for ii in idx_comparison:
-            if ii != i:
-                current_comps.append(ii)
+        current_comps = [ii for ii in idx_comparison if ii != i]
         if len(current_comps) == 0:
             current_comps = idx_all_comps_sorted[0:10]
             comp_apertures = comp_apertures * len(current_comps)
@@ -338,136 +461,197 @@ def save_photometry_hs(data, idx, idx_comparison,
         r_flux1, r_flux_err1 = super_comparison_detrend(data, i, current_comps, chosen_aperture,
                                                         comp_apertures=comp_apertures, plot_comps=False,
                                                         all_idx=all_idx)
+        r_flux1, r_flux_err1 = r_flux1[idx_sort_times], r_flux_err1
         r_flux2, r_flux_err2 = super_comparison_detrend(data, i, current_comps, min_aperture,
                                                         comp_apertures=comp_apertures, plot_comps=False,
                                                         all_idx=all_idx)
+        r_flux2, r_flux_err2 = r_flux2[idx_sort_times], r_flux_err2[idx_sort_times]
         r_flux3, r_flux_err3 = super_comparison_detrend(data, i, current_comps, max_aperture,
                                                         comp_apertures=comp_apertures, plot_comps=False,
                                                         all_idx=all_idx)
-        # (100.**.2) is equal to 2.512
+        r_flux3, r_flux_err3 = r_flux3[idx_sort_times], r_flux_err3[idx_sort_times]
+
+        # (100.**.2) ~ 2.512
         mag_fact = (100. ** .2)
-        rmag1 = -mag_fact * np.log10(r_flux1)
-        rmag1_err = r_flux_err1 * mag_fact / (np.log(10) * r_flux1)
-        rmag2 = -mag_fact * np.log10(r_flux2)
-        rmag2_err = r_flux_err2 * mag_fact / (np.log(10) * r_flux2)
-        rmag3 = -mag_fact * np.log10(r_flux3)
-        rmag3_err = r_flux_err3 * mag_fact / (np.log(10) * r_flux3)
+        # Get Relative Mags Data
+        rmag1 = (-mag_fact * np.log10(r_flux1))
+        rmag1_err = (r_flux_err1 * mag_fact / (np.log(10) * r_flux1))
+        rmag2 = (-mag_fact * np.log10(r_flux2))
+        rmag2_err = (r_flux_err2 * mag_fact / (np.log(10) * r_flux2))
+        rmag3 = (-mag_fact * np.log10(r_flux3))
+        rmag3_err = (r_flux_err3 * mag_fact / (np.log(10) * r_flux3))
 
-        idx_not_nan = np.where(~np.isnan(rmag1))[0]
-        all_rms.append(np.sqrt(np.var(rmag1[idx_not_nan])))
+        # Get Mags Data
+        mag1 = (-mag_fact * np.log10(flux))
+        mag1_err = (mag_fact * flux_err / (np.log(10.) * flux))
+        mag2 = (-mag_fact * np.log10(flux_min))
+        mag2_err = (mag_fact * flux_min_err / (np.log(10.) * flux_min))
+        mag3 = (-mag_fact * np.log10(flux_max))
+        mag3_err = (mag_fact * flux_max_err / (np.log(10.) * flux_max))
 
-        for j in idx_sort_times:
-            if (not np.isnan(rmag1[j])) and (not np.isnan(rmag2[j])) and (not np.isnan(rmag3[j])):
-                # Get magnitudes and errors:
-                mag1 = -mag_fact * np.log10(d['fluxes_' + str(chosen_aperture) + '_pix_ap'][all_idx][j])
-                mag1_err = (mag_fact * d['fluxes_' + str(chosen_aperture) + '_pix_ap_err'][all_idx][j]) / (
-                        np.log(10.) * d['fluxes_' + str(chosen_aperture) + '_pix_ap'][all_idx][j])
-                mag2 = -mag_fact * np.log10(d['fluxes_' + str(min_aperture) + '_pix_ap'][all_idx][j])
-                mag2_err = (mag_fact * (d['fluxes_' + str(min_aperture) + '_pix_ap_err'][all_idx][j])) / (
-                        np.log(10.) * d['fluxes_' + str(min_aperture) + '_pix_ap'][all_idx][j])
-                mag3 = -mag_fact * np.log10(d['fluxes_' + str(max_aperture) + '_pix_ap'][all_idx][j])
-                mag3_err = (mag_fact * (d['fluxes_' + str(max_aperture) + '_pix_ap_err'][all_idx][j])) / (
-                        np.log(10.) * d['fluxes_' + str(max_aperture) + '_pix_ap'][all_idx][j])
+        # Set all fwhms that are 0 to -1
+        FWHMs[FWHMs == 0] = -1
 
-                if d['fwhm'][all_idx][j] != 0.:
-                    FWHM = d['fwhm'][all_idx][j]
-                else:
-                    FWHM = -1
-                lst_deg = CoordsToDecimal(data['LST'][all_idx][j], hours=True)
-                HA = lst_deg - ra
-                ZA = np.arccos(1. / float(data['airmasses'][all_idx][j])) * (180. / np.pi)
-                Z = float(data['airmasses'][all_idx][j])
+        lst_deg = CoordsToDecimal(data['LST'][all_idx][idx_sort_times], hours=True)
+        HA = lst_deg - ra
+        Z = data['airmasses'][all_idx][idx_sort_times].astype(float)
+        ZA = np.arccos(1. / Z) * (180. / np.pi)
 
-                entries = [data['frame_name'][all_idx][j].split('/')[-1], data['BJD_times'][all_idx][j],
-                           data['JD_times'][all_idx][j],
-                           mag1, mag1_err, mag2, mag2_err, mag3, mag3_err,
-                           rmag1[j], rmag2[j], rmag3[j], d['centroids_x'][all_idx][j],
-                           d['centroids_y'][all_idx][j], d['background'][all_idx][j], d['background_err'][all_idx][j],
-                           FWHM,
-                           HA, ZA, Z]
-                f.write(s.format(*entries))
-        f.close()
+        # frame names in order
+        frame_names = [frame_name.split('/')[-1] for frame_name in data['frame_name'][all_idx][idx_sort_times]]
+        bjd_times = data['BJD_times'][all_idx][idx_sort_times]
+        jd_times = data['JD_times'][all_idx][idx_sort_times]
+        centroids_x = d['centroids_x'][all_idx][idx_sort_times]
+        centroids_y = d['centroids_y'][all_idx][idx_sort_times]
+        background = d['background'][all_idx][idx_sort_times]
+        background_err = d['background_err'][all_idx][idx_sort_times]
+
+        tableData = {hrd: col for hrd, col in zip(header, [frame_names, bjd_times, jd_times, mag1, mag1_err,
+                                                      mag2, mag2_err, mag3, mag3_err, rmag1, rmag1_err,
+                                                      rmag2, rmag2_err, rmag3, rmag3_err, centroids_x,
+                                                      centroids_y, background, background_err, FWHMs,
+                                                      HA, ZA, Z])}
+        table = pd.DataFrame(tableData)
+        table.to_csv(csv_path, index=False)
+        table.to_html(html_path, float_format=lambda double: '%.4f' % double)
+        dataframe2epdlc(table, epdlc_path)
+        save_trendStats(table, trends_folder, starID=star_name)
+
+
+def radial_profile(data, center):
+    """
+    :param data: 2D array image
+    :param center: x,y for the center
+    :return: 1D array of average flux for each pixel distance from center
+    """
+    x, y = np.indices(data.shape)
+    r = np.sqrt((x - center[0])**2 + (y - center[1])**2)
+    r = r.astype(np.int)
+
+    tbin = np.bincount(r.ravel(), data.ravel())
+    nr = np.bincount(r.ravel())
+    radialprofile = tbin / nr
+    return radialprofile
 
 
 def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap,
                 comp_apertures, out_dir, frames, idx_frames, half_size=50, overwrite=False):
-    def plot_im(d, cen_x, cen_y, obj_x, obj_y, ap, min_ap, max_ap,
-                half_size, frame_name, object_name, overwrite):
-        # if not out_dir.endswith('/'):
-        #    out_dir = out_dir + '/'
+    def plot_im(d, cen_x, cen_y, obj_x, obj_y, ap: int, min_ap: int, max_ap: int,
+                half_size, frame_name: str, object_name: str, overwrite, norm: ImageNormalize=None):
         if 'full_frame' in object_name:
-            fullf_path = os.path.join(out_dir, 'sub_imgs', 'full_frame/')
+            fullf_path = os.path.join(out_dir, 'sub_imgs', 'full_frame')
             if not os.path.exists(fullf_path):
                 os.makedirs(fullf_path)
-            fname = '{:}/sub_imgs/{:}/{:}_{:}.png'.format(
-                out_dir, 'full_frame', object_name, frame_name.split('/')[-1])
+            # the following is an new python format... called Literal String Formatting or f'Strings
+            fname = f'{out_dir:}/sub_imgs/full_frame/{object_name:}_{frame_name.split("/")[-1]:}.png'
+            fname_3d = fname_r =None
         else:
-            if not os.path.exists(out_dir + 'sub_imgs/' + object_name):
-                os.makedirs(out_dir + 'sub_imgs/' + object_name)
-            fname = '{:}/sub_imgs/{:}/{:}_{:}.png'.format(
-                out_dir, object_name, frame_name.split('/')[-1], object_name)
+            if not os.path.exists(os.path.join(out_dir, 'sub_imgs', object_name, 'surfaces')):
+                os.makedirs(os.path.join(out_dir, 'sub_imgs', object_name, 'surfaces'))
+            if not os.path.exists(os.path.join(out_dir, 'sub_imgs', object_name, 'radial_plot')):
+                os.makedirs(os.path.join(out_dir, 'sub_imgs', object_name, 'radial_plot'))
+            fname = f'{out_dir:}/sub_imgs/{object_name:}/{frame_name.split("/")[-1]:}_{object_name:}.png'
+            fname_3d = f'{out_dir:}/sub_imgs/{object_name:}/surfaces/{frame_name.split("/")[-1]:}_{object_name:}.png'
+            fname_r = f'{out_dir:}/sub_imgs/{object_name:}/radial_plot/{frame_name.split("/")[-1]:}_{object_name:}.png'
         if not os.path.exists(fname) or overwrite:
             # Plot image of the target:
-            fig = plt.figure()
-            x0 = np.max([0, int(cen_x) - half_size])
-            x1 = np.min([int(cen_x) + half_size, d.shape[1]])
-            y0 = np.max([0, int(cen_y) - half_size])
-            y1 = np.min([int(cen_y) + half_size, d.shape[0]])
-            subimg = np.copy(d[y0:y1, x0:x1])
-            subimg = subimg - np.median(subimg)
-            x_cen = obj_x - x0
-            y_cen = obj_y - y0
-            im = plt.imshow(subimg)
-            im.set_clim(np.median(subimg), 1.5 * np.percentile(subimg, 97.5))
-            plt.plot(x_cen, y_cen, 'wx', markersize=15, lw=2, alpha=0.5)
-            circle = plt.Circle((x_cen, y_cen), min_ap, color='black', lw=2, alpha=0.5, fill=False)
-            circle2 = plt.Circle((x_cen, y_cen), max_ap, color='black', lw=2, alpha=0.5, fill=False)
-            circle3 = plt.Circle((x_cen, y_cen), ap, color='white', lw=2, alpha=0.5, fill=False)
+            x0 = max(0, int(cen_x) - half_size)
+            x1 = min(int(cen_x) + half_size, d.shape[1])
+            y0 = max(0, int(cen_y) - half_size)
+            y1 = min(int(cen_y) + half_size, d.shape[0])
+            # plot 2D Subimage
+            subimg = d[y0:y1, x0:x1].copy()
+            subimg -= np.median(subimg)
+            # create normalization for plotting
+            if norm is not None:
+                norm = ImageNormalize(subimg, interval=ZScaleInterval(), stretch=LinearStretch())
+            extent = (x0, x1, y0, y1)
+            plt.imshow(subimg, extent=extent, interpolation='none', origin='lower', norm=norm)
+            plt.plot(obj_x, obj_y, 'wx', markersize=15, lw=2, alpha=0.5)
+            circle = plt.Circle((obj_x, obj_y), min_ap, color='black', lw=2, alpha=0.5, fill=False)
+            circle2 = plt.Circle((obj_x, obj_y), max_ap, color='black', lw=2, alpha=0.5, fill=False)
+            circle3 = plt.Circle((obj_x, obj_y), ap, color='white', lw=2, alpha=0.5, fill=False)
             plt.gca().add_artist(circle)
             plt.gca().add_artist(circle2)
             plt.gca().add_artist(circle3)
-            plt.savefig(fname, dpi=150, bbox_inches='tight')
+            plt.savefig(fname, dpi=125, bbox_inches='tight')
             plt.close()
-            if object_name == 'target':
-                print(frame_name)
-                print('Max flux:', np.max(subimg))
-                print('Centroid:', cen_x, cen_y)
 
+            if fname_3d is not None:
+                # plot 3D Surface subimage
+                x = np.arange(x1 - x0) + x0
+                y = np.arange(y1 - y0) + y0
+                X, Y = np.meshgrid(x, y)
+                fig = plt.figure()
+                ax = fig.gca(projection='3d')
+                ax.plot_surface(X, Y, subimg, rstride=8, cstride=8, alpha=0.9, cmap='summer', norm=norm)
+                circle = plt.Circle((obj_x, obj_y), min_ap, color='black', lw=2, alpha=0.5, fill=False)
+                circle2 = plt.Circle((obj_x, obj_y), max_ap, color='black', lw=2, alpha=0.5, fill=False)
+                circle3 = plt.Circle((obj_x, obj_y), ap, color='white', lw=2, alpha=0.5, fill=False)
+                ax.add_patch(circle)
+                ax.add_patch(circle2)
+                ax.add_patch(circle3)
+                art3d.pathpatch_2d_to_3d(circle, z=subimg.mean(), zdir="z")
+                art3d.pathpatch_2d_to_3d(circle2, z=subimg.mean(), zdir="z")
+                art3d.pathpatch_2d_to_3d(circle3, z=subimg.mean(), zdir="z")
+                ax.view_init(25, 30)
+                ax.set_xlabel('X')
+                ax.set_ylabel('Y')
+                ax.set_zlabel('Counts')
+                fig.savefig(fname_3d, dpi=125, bbox_inches='tight')
+                plt.close()
+
+                # Plot Radial profile for target
+                center = obj_x - x0, obj_y - y0
+                rad_profile = radial_profile(subimg, center)[:25]
+                fig, ax = plt.subplots()
+                plt.plot(rad_profile, 'x-')
+                plt.tick_params(which='both', width=2)
+                plt.tick_params(which='major', length=7)
+                plt.tick_params(which='minor', length=4, color='r')
+                ax.xaxis.set_minor_locator(minorLocator)
+                plt.grid()
+                ax.set_ylabel("Counts")
+                ax.set_xlabel("Pixels")
+                plt.grid(which="minor")
+                fig.savefig(fname_r, bbox_inches='tight')
+                plt.close()
     # Get the centroids of the target:
     target_cen_x, target_cen_y = get_cens(data, idx, idx_frames)
-    print('Target:', 'target_star_' + str(idx))
-
     # Same for the comparison stars:
-    for i in range(len(idx_comparison)):
+
+    comp_cen_x, comp_cen_y = get_cens(data, idx_comparison[0], idx_frames)
+    all_comp_cen_x = np.atleast_2d(comp_cen_x)
+    all_comp_cen_y = np.atleast_2d(comp_cen_y)
+
+    for i in range(1, len(idx_comparison)):
         idx_c = idx_comparison[i]
         comp_cen_x, comp_cen_y = get_cens(data, idx_c, idx_frames)
-        if i == 0:
-            all_comp_cen_x = np.atleast_2d(comp_cen_x)
-            all_comp_cen_y = np.atleast_2d(comp_cen_y)
-        else:
-            all_comp_cen_x = np.vstack((all_comp_cen_x, comp_cen_x))
-            all_comp_cen_y = np.vstack((all_comp_cen_y, comp_cen_y))
+        all_comp_cen_x = np.vstack((all_comp_cen_x, comp_cen_x))
+        all_comp_cen_y = np.vstack((all_comp_cen_y, comp_cen_y))
 
     # Now plot images around centroids plus annulus:
     exts = np.unique(data['data']['ext']).astype('int')
     nframes = len(frames)
     for i in range(nframes):
         for ext in exts:
-            d = pyfits.getdata(frames[i], ext=ext)
-            idx_names = np.where(data['data']['ext'] == ext)
+            frame: str = frames[i]
+            if not os.path.isfile(frame):
+                frame = frame.replace(' ', '_')
+            d = fits.getdata(frame, ext=ext)
+            idx_names = data['data']['ext'] == ext
             names_ext = data['data']['names'][idx_names]
+            # Create normalization for plotting
+            norm = ImageNormalize(d.copy() - np.median(d), interval=ZScaleInterval(), stretch=LinearStretch())
             for name in names_ext:
                 if 'target' in name:
                     # Plot image of the target:
                     if i == 0:
-                        plot_im(d, target_cen_x[0], target_cen_y[0],
-                                target_cen_x[i], target_cen_y[i],
-                                aperture, min_ap, max_ap,
-                                4 * half_size, frames[i], 'target_full_frame', overwrite)
-                    plot_im(d, target_cen_x[0], target_cen_y[0],
-                            target_cen_x[i], target_cen_y[i],
-                            aperture, min_ap, max_ap,
-                            half_size, frames[i], 'target', overwrite)
+                        plot_im(d, target_cen_x[0], target_cen_y[0], target_cen_x[i], target_cen_y[i],
+                                aperture, min_ap, max_ap, 4 * half_size, frames[i], 'target_full_frame',
+                                overwrite, norm)
+                    plot_im(d, target_cen_x[0], target_cen_y[0], target_cen_x[i], target_cen_y[i],
+                            aperture, min_ap, max_ap, half_size, frames[i], 'target', overwrite, norm)
             # Plot image of the comparisons:
             for j in range(len(idx_comparison)):
                 idx_c = idx_comparison[j]
@@ -475,22 +659,19 @@ def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap,
                 if name in names_ext:
                     if i == 0:
                         plot_im(d, np.median(all_comp_cen_x[j, :]), np.median(all_comp_cen_y[j, :]),
-                                all_comp_cen_x[j, i], all_comp_cen_y[j, i],
-                                comp_apertures[j], min_ap, max_ap,
-                                4 * half_size, frames[i], name + '_full_frame', overwrite)
+                                all_comp_cen_x[j, i], all_comp_cen_y[j, i], comp_apertures[j], min_ap, max_ap,
+                                4 * half_size, frames[i], name + '_full_frame', overwrite, norm)
                     plot_im(d, np.median(all_comp_cen_x[j, :]), np.median(all_comp_cen_y[j, :]),
-                            all_comp_cen_x[j, i], all_comp_cen_y[j, i],
-                            comp_apertures[j], min_ap, max_ap,
-                            half_size, frames[i], name, overwrite)
+                            all_comp_cen_x[j, i], all_comp_cen_y[j, i], comp_apertures[j], min_ap, max_ap,
+                            half_size, frames[i], name, overwrite, norm)
 
 
-def plot_cmd(colors, data, idx_target, idx_comparison, post_dir):
+def plot_cmd(colors, data, idx, idx_comparison, post_dir):
     """
     Plot the color-magnitude diagram of all stars, 
     indicating the target and selected comparison stars.
     """
     ms = plt.rcParams['lines.markersize']
-    fig = plt.figure()
     plt.plot(colors, data['data']['Jmag'], 'b.', label='All stars')
     plt.plot(colors[idx], data['data']['Jmag'][idx], 'ro', ms=ms * 2, label='Target')
     plt.plot(colors[idx_comparison], data['data']['Jmag'][idx_comparison], 'r.', label='Selected comparisons')
@@ -546,7 +727,7 @@ parser.set_defaults(plt_images=False)
 parser.add_argument('--all_plots', dest='all_plots', action='store_true')
 parser.set_defaults(all_plots=False)
 parser.add_argument('--overwrite', dest='overwrite', action='store_true')
-parser.set_defaults(overwrite=False)
+parser.set_defaults(overwrite=True)
 
 args = parser.parse_args()
 
@@ -558,10 +739,15 @@ all_plots = args.all_plots
 overwrite = args.overwrite
 telescope = args.telescope
 target_name = args.target_name
-telescope = args.telescope
 date = args.datafolder
 band = args.band
 dome = args.dome
+target_coords = [[args.ra, args.dec.split()[0]]]
+min_ap = int(args.minap)
+max_ap = int(args.maxap)
+forced_aperture = int(args.forced_aperture)
+ncomp = int(args.ncomp)
+filename = 'photometry.pkl'
 
 # Check if given telescope is in server, if it is use it, else exit program:
 inServer = any([telescope.upper() == tel.upper() for tel in get_telescopes()])
@@ -575,44 +761,36 @@ if datafolder is None:
         print("No existing folder... Exiting...")
         exit(-1)
 
-if telescope == 'SWOPE':
-    foldername = datafolder + telescope + '/red/' + date + '/' + target_name + '/'
-elif telescope == 'CHAT':
-    foldername = datafolder + 'red/' + date + '/' + target_name + '_' + band + '/'
-else:
-    foldername = os.path.join(datafolder, 'red', target_name, band, date)
-    # foldername = datafolder +'red/'+target_name+'/'+band.upper()+'/'+date+'/'+target_name+'_'+band+'/'
+red_path = os.path.join(datafolder, 'red', target_name, band, date)
 
-post_dir = os.path.join(foldername, 'post_processing/')
+# make directory for post processing files
+post_dir = os.path.join(red_path, 'post_processing/')
 if not os.path.exists(post_dir):
     os.makedirs(post_dir)
 
-filename = 'photometry.pkl'
-target_coords = [[args.ra, args.dec.split()[0]]]
-min_ap = int(args.minap)
-max_ap = int(args.maxap)
-forced_aperture = int(args.forced_aperture)
-ncomp = int(args.ncomp)
+if not os.path.exists(os.path.join(post_dir, 'post_processing_outputs')):
+    os.makedirs(os.path.join(post_dir, 'post_processing_outputs'))
+
 #################################################
 
 # Convert target coordinates to degrees:
 target_ra, target_dec = CoordsToDecimal(target_coords)
 
-log('ABOUT TO OPEN PICKLE')
-
 # Open dictionary, save times:
-data = pickle.load(open(os.path.join(foldername, filename), 'rb'))
+data = pickle.load(open(os.path.join(red_path, filename), 'rb'))
 all_sites = len(data['frame_name']) * [[]]
 all_cameras = len(data['frame_name']) * [[]]
 
 for i in range(len(data['frame_name'])):
     frames = data['frame_name'][i]
-    with pyfits.open(frames) as hdulist:
+    if not os.path.exists(frames):
+        frames = frames.replace(' ', '_')
+    with fits.open(frames) as hdulist:
         h = hdulist[0].header
     try:
         all_sites[i] = telescope
         all_cameras[i] = h['INSTRUME']
-    except:
+    except (KeyError, IndexError):
         all_sites[i] = telescope
         all_cameras[i] = 'VATT4k'
 
@@ -633,9 +811,10 @@ print('Observations taken from: ', sites)
 all_ras, all_decs = data['data']['RA_degs'], data['data']['DEC_degs']
 # Search for the target:
 distance = np.sqrt((all_ras - target_ra) ** 2 + (all_decs - target_dec) ** 2)
-idx = (np.where(distance == np.min(distance))[0])[0]
+# idx_target: index of main target
+idx_target: int = np.argmin(distance)
 # Search for closest stars in color to target star:
-target_hmag, target_jmag = data['data']['Hmag'][idx], data['data']['Jmag'][idx]
+target_hmag, target_jmag = data['data']['Hmag'][idx_target], data['data']['Jmag'][idx_target]
 colors = data['data']['Jmag'] - data['data']['Hmag']
 target_color = target_hmag - target_jmag
 distance = np.sqrt((colors - target_color) ** 2. + (target_jmag - data['data']['Jmag']) ** 2.)
@@ -643,7 +822,7 @@ idx_distances = np.argsort(distance)
 idx_all_comps = []
 # Start with full set of comparison stars, provided they are good:
 for i in idx_distances:
-    if i == idx:
+    if i == idx_target:
         continue
     if check_star(data, i, min_ap, max_ap, force_aperture, forced_aperture):
         idx_all_comps.append(i)
@@ -652,27 +831,28 @@ for site in sites:
     print('\t Photometry for site:', site)
     idx_frames = frames_from_site[site]
     times = data['BJD_times'][idx_frames]
+    # DEBUGGIN:
+    isWrong = np.all(times[0] == times)
+    if isWrong:
+        log("For some reason the BJD_times keyword in pickle contains an array repeating the same number.")
     idx_sort_times = np.argsort(times)
-    cam = (site.split('+')[-1]).split('_')[-1]
     step = len(data['frame_name'][idx_frames]) // 5
+    step = step if step > 0 else 1
     print('\t Frames Summary: ~',
           str(data['frame_name'][idx_frames][0:-1:step]).replace('\n', '\n\t\t'))
     # Check which is the aperture that gives a minimum rms:
     if force_aperture:
         print('\t Forced aperture to ', forced_aperture)
-        chosen_aperture = forced_aperture
+        chosen_aperture: int = forced_aperture
     else:
         print('\t Estimating optimal aperture...')
         apertures_to_check = range(min_ap, max_ap)
         precision = np.zeros(len(apertures_to_check))
 
-        if not os.path.exists(os.path.join(post_dir, 'post_processing_outputs')):
-            os.mkdir(os.path.join(post_dir, 'post_processing_outputs'))
-
         for i in range(len(apertures_to_check)):
             aperture = apertures_to_check[i]
             # Check the target
-            relative_flux, relative_flux_err = super_comparison_detrend(data, idx, idx_all_comps, aperture,
+            relative_flux, relative_flux_err = super_comparison_detrend(data, idx_target, idx_all_comps, aperture,
                                                                         all_idx=idx_frames)
 
             save_photometry(times[idx_sort_times], relative_flux[idx_sort_times], relative_flux_err[idx_sort_times],
@@ -691,30 +871,37 @@ for site in sites:
     idx_comparison = []
     comp_apertures = []
     comp_correlations = []
-    target_flux = data['data']['target_star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap'][idx_frames]
-    target_flux_err = data['data']['target_star_' + str(idx)]['fluxes_' + str(chosen_aperture) + '_pix_ap_err'][
+    target_flux = data['data']['target_star_' + str(idx_target)]['fluxes_' + str(chosen_aperture) + '_pix_ap'][idx_frames]
+    target_flux_err = data['data']['target_star_' + str(idx_target)]['fluxes_' + str(chosen_aperture) + '_pix_ap_err'][
         idx_frames]
     exptimes = data['exptimes']
     for idx_c in idx_all_comps:
-        log("Checking the correlation between the target and comparison flux")
-        # Check the correlation between the target and comparison flux
         star = 'star_%d' % idx_c
         flux_ap = 'fluxes_%d_pix_ap' % chosen_aperture
         flux_ap_err = 'fluxes_%d_pix_ap_err' % chosen_aperture
-        log("For %s using %s" % (star, flux_ap))
-
         comp_flux = (data['data'][star][flux_ap] / exptimes)[idx_frames]
         comp_flux_err = (data['data'][star][flux_ap_err] / exptimes)[idx_frames]
+
+        # quick test for NaN's on all comparison stars
+        isNan = np.isnan(np.sum(np.append(comp_flux, comp_flux_err)))
+        if isNan:
+            isFloat = isinstance(exptimes[0], float)
+            isConsistent = np.all(exptimes == exptimes[0])
+            log("ALERT: Reference Star's Flux or Flux Err contains NaNs. Details:")
+            log("Star ID: %s\tAperture: %d\t Correct Exptime Format: %r" % (star, chosen_aperture,
+                                                                            isFloat and isConsistent))
+        # Check the correlation between the target and comparison flux
         result = linregress(target_flux, comp_flux)
         comp_correlations.append(result.rvalue ** 2)
 
     # set NaNs to 0
     comp_correlations = np.array(comp_correlations)
-    comp_correlations[np.isnan(comp_apertures)] = 0
+    comp_correlations[np.isnan(comp_correlations)] = 0
 
+    # get comp_correlations in descending order
     comp_corr_idxsorted = np.argsort(comp_correlations)[::-1]
     comp_corr_sorted = np.array(comp_correlations)[comp_corr_idxsorted]
-    log("Sorted Comparison correlations:\n{:}".format(comp_corr_sorted))
+    log("Sorted Comparison correlations:\n{:}".format(comp_corr_sorted[:10]))
     idx_all_comps_sorted = list(np.array(idx_all_comps)[comp_corr_idxsorted])
 
     # Selecting optimal number of comparisons, if not pre-set with flag
@@ -722,14 +909,14 @@ for site in sites:
         closest_yet = np.inf
         for i in range(len(idx_all_comps_sorted)):
             # Check the target
-            relative_flux, relative_flux_err = super_comparison_detrend(data, idx, idx_all_comps_sorted[0:i + 1],
+            relative_flux, relative_flux_err = super_comparison_detrend(data, idx_target, idx_all_comps_sorted[:i + 1],
                                                                         chosen_aperture, all_idx=idx_frames)
             mfilt = median_filter(relative_flux[idx_sort_times])
-            prec = np.median(relative_flux_err) * 1e6
+            prec = np.nanmedian(relative_flux_err) * 1e6
             rms_scatter = get_sigma(relative_flux[idx_sort_times] - mfilt) * 1e6
             rel_diff = np.abs(prec - rms_scatter) / prec
             if rel_diff < closest_yet:
-                ncomp = i + 1
+                ncomp += 1
                 best_precision = prec
                 closest_yet = rel_diff
 
@@ -742,7 +929,7 @@ for site in sites:
     log(msg2.replace('\t', ''))
 
     # Plot the color-magnitude diagram
-    plot_cmd(colors, data, idx, idx_comparison, post_dir)
+    plot_cmd(colors, data, idx_target, idx_comparison, post_dir)
 
     comp_apertures = []
     # Check the comparisons, and optionally select their apertures
@@ -778,14 +965,6 @@ for site in sites:
         exptimes = data['exptimes']
         comp_flux = (data['data'][comp_star_id][comp_fluxes_id] / exptimes)[idx_frames]
         comp_flux_err = (data['data'][comp_star_id][comp_fluxes_err_id] / exptimes)[idx_frames]
-
-        # detect if comp_flux or comp_flux_err contain NaNs
-        # quick test for nans
-        isNan = np.isnan(np.sum(np.append(comp_flux, comp_flux_err)))
-        if isNan:
-            log("ALERT: Selected Comparison Star's Flux or Flux Err contains NaNs. Details:")
-            log("Star ID: %s\tAperture: %d" % (comp_star_id, the_aperture))
-
         save_photometry(times[idx_sort_times], comp_flux[idx_sort_times], comp_flux_err[idx_sort_times],
                         post_dir + 'raw_light_curves/',
                         target_name='star_{:}_photometry_ap{:}_pix'.format(i_c, the_aperture),
@@ -798,22 +977,22 @@ for site in sites:
         comp_apertures.append(the_aperture)
 
     # Save the raw light curves for the target as well
-    target_flux = (data['data']['target_star_%d' % idx]['fluxes_%d_pix_ap' % chosen_aperture] / exptimes)[idx_frames]
+    target_flux = (data['data']['target_star_%d' % idx_target]['fluxes_%d_pix_ap' % chosen_aperture] / exptimes)[idx_frames]
     target_flux_err = \
-        (data['data']['target_star_%d' % idx]['fluxes_%d_pix_ap_err' % chosen_aperture] / exptimes)[idx_frames]
+        (data['data']['target_star_%d' % idx_target]['fluxes_%d_pix_ap_err' % chosen_aperture] / exptimes)[idx_frames]
 
-    # detect if comp_flux or comp_flux_err contain NaNs
+    # detect if target_flux or target_flux_err contain NaNs
     # quick test for nans
     isNan = np.isnan(np.sum(np.append(target_flux, target_flux_err)))
     if isNan:
         log("ALERT: Target Star's Flux or Flux Err contains NaNs. Details:")
-        log("Star ID: %d\tAperture: %d" % (idx, chosen_aperture))
+        log("Star ID: %d\tAperture: %d" % (idx_target, chosen_aperture))
 
     save_photometry(times[idx_sort_times], target_flux[idx_sort_times], target_flux_err[idx_sort_times],
                     post_dir + 'raw_light_curves/', target_name='target_photometry_ap{:}_pix'.format(chosen_aperture),
                     plot_data=True, units='Counts')
     # And save the super comparison
-    _, _, super_comp, super_comp_err = super_comparison_detrend(data, idx, idx_all_comps_sorted[0:ncomp],
+    _, _, super_comp, super_comp_err = super_comparison_detrend(data, idx_target, idx_all_comps_sorted[0:ncomp],
                                                                 chosen_aperture, comp_apertures=comp_apertures,
                                                                 all_idx=idx_frames, supercomp=True)
     save_photometry(times[idx_sort_times], super_comp[idx_sort_times], super_comp_err[idx_sort_times],
@@ -824,23 +1003,23 @@ for site in sites:
     # Saving sub-images
     if plt_images:
         print('\t Plotting and saving sub-images...')
-        plot_images(data, idx, idx_comparison, chosen_aperture, min_ap, max_ap,
+        log('Plotting and saving sub-images...')
+        plot_images(data, idx_target, idx_comparison, chosen_aperture, min_ap, max_ap,
                     comp_apertures, post_dir, data['frame_name'][idx_frames],
                     idx_frames, overwrite=overwrite)
 
     # Save and plot final LCs:
     print('\t Getting final relative flux...')
-    relative_flux, relative_flux_err = super_comparison_detrend(
-        data, idx, idx_comparison, chosen_aperture,
-        comp_apertures=comp_apertures,
-        plot_comps=all_plots, all_idx=idx_frames)
+    relative_flux, relative_flux_err = super_comparison_detrend( data, idx_target, idx_comparison, chosen_aperture,
+                                                                 comp_apertures=comp_apertures, plot_comps=all_plots,
+                                                                 all_idx=idx_frames)
 
     print('\t Saving...')
     save_photometry(times[idx_sort_times], relative_flux[idx_sort_times], relative_flux_err[idx_sort_times],
                     post_dir, target_name=target_name, plot_data=True,
-                    title=target_name + ' on ' + foldername.split('/')[-1] + ' in ' + band + ' at ' + site)
+                    title=target_name + ' on ' + red_path.split('/')[-1] + ' in ' + band + ' at ' + site)
 
-    save_photometry_hs(data, idx, idx_comparison, chosen_aperture, min_ap, max_ap, comp_apertures,
+    save_photometry_hs(data, idx_target, idx_comparison, chosen_aperture, min_ap, max_ap, comp_apertures,
                        idx_sort_times, post_dir, target_name, band=band, all_idx=idx_frames)
 
     print('\t Done!\n')
