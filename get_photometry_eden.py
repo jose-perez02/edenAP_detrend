@@ -115,9 +115,7 @@ for i in range(len(files)):
                 DEC = find_val(h0, 'DEC')
             all_ras.append(RA)
             all_decs.append(DEC)
-            out_folder = os.path.join(out_red_folder, datafolder)
-            if not os.path.exists(out_folder):
-                os.mkdir(out_folder)
+
         good_objects.append(i)
 files = [files[i] for i in good_objects]
 object_in_files = [object_in_files[i] for i in good_objects]
