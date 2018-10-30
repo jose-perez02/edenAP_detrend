@@ -124,7 +124,7 @@ for i in range(len(date_dirs)):
         RA, DEC = PhotUtils.get_general_coords(targets[i],parser.parse(dates[i].isot))
         target_coords = [[RA,DEC]]
         
-        post_processing(tele,reduced_dir,targets[i],target_coords,overwrite=True)
+        post_processing(tele,reduced_dir,targets[i],target_coords,overwrite=True,ncomp=6)
     else:
         print("Skipping post-processing...")
 

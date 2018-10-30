@@ -384,7 +384,7 @@ def dataframe2epdlc(table: pd.DataFrame, out_path: str):
         epdlc.writelines(formatted_rows)
 
 
-def save_photometry_hs(data, idx, idx_comparison,
+def save_photometry_hs(data, idx, idx_comparison,idx_all_comps_sorted,
                        chosen_aperture: int, min_aperture: int, max_aperture: int,
                        comp_apertures, idx_sort_times, output_folder: str,
                        target_name: str, band='i', all_idx=None):
@@ -986,7 +986,7 @@ def post_processing(telescope,datafolder,target_name,target_coords,band='ip',nco
                         post_dir, target_name=target_name, plot_data=True,
                         title=target_name + ' on ' + red_path.split('/')[-1] + ' at ' + site)
         # pdb.set_trace()
-        save_photometry_hs(data, idx_target, idx_comparison, chosen_aperture, min_ap, max_ap, comp_apertures,
+        save_photometry_hs(data, idx_target, idx_comparison, idx_all_comps_sorted, chosen_aperture, min_ap, max_ap, comp_apertures,
                            idx_sort_times, post_dir, target_name, band=band, all_idx=idx_frames)
 
         print('\t Done!\n')
