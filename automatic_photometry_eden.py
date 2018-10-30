@@ -38,7 +38,7 @@ parserIO.add_argument('-telescope',default=None,help='name of telescope (e.g., V
 parserIO.add_argument('-ndays',default=7,help='number of days to look back')
 parserIO.add_argument('-target',default=None,help='specify the target')
 parserIO.add_argument('--raw',action='store_true',help='look for data in the RAW directory instead of CALIBRATED')
-parserIO.add_argument('--overwrite',action='store_true',help='unclear (legacy)')
+parserIO.add_argument('--overwrite',action='store_true',help='overwrite existing photometry (photometry.pkl)')
 parserIO.add_argument('--photometry',action='store_true',help='ONLY do the photometry')
 parserIO.add_argument('--post-processing',action='store_true',help='ONLY do the post-processing (must do photometry first!)')
 args = parserIO.parse_args()
@@ -64,9 +64,8 @@ if args.target is not None:
     # Convert the astropy Table into a string array
     target_names = target_names.as_array().astype(str)
     
-    # Replace double spaces (why are these in SIMBAD?) and replace spaces with underscores,
-    # to match the directory structure
-    target_names = [name.replace('  ',' ').replace(' ','_') for name in target_names]
+    # Replace double spaces (why are these in SIMBAD?)
+    target_names = [name.replace('  ',' ') for name in target_names]
     
     print("\nTarget {:s} identified by SIMBAD under the following names:".format(args.target))
     print(target_names)
@@ -84,22 +83,35 @@ mask = dates>(today-ndays*u.day)
 date_dirs,dates = date_dirs[mask],dates[mask]
 
 # Filter to the selected target
-targets = np.array([d.strip('/').split('/')[-2] for d in date_dirs]) 
-mask = np.in1d(targets,target_names)
-date_dirs,dates,targets = date_dirs[mask],dates[mask],targets[mask]
+targets = np.array([d.strip('/').split('/')[-2] for d in date_dirs])
+if target_names is not None:
+    mask = np.in1d(targets,target_names)
+    # Also check for names with underscores
+    mask = mask|np.in1d(targets,[name.replace(' ','_') for name in target_names])
+    date_dirs,dates,targets = date_dirs[mask],dates[mask],targets[mask]
 
 # Print some info about the reduction to be performed
 print("\nFound {:d} data sets from within the past {:d} days under {:s}.".format(mask.sum(),ndays,dtype))
 print("Targets: "+", ".join(np.unique(targets)))
 
+# Overwrite bypass (will double-check once)
+bypass = False
+
 # Loop through the directories
 for i in range(len(date_dirs)):
     print("\nTarget: {:s} | Date: {:s}".format(targets[i],dates[i].iso.split()[0]))
+    reduced_dir = date_dirs[i].replace(dtype,'REDUCED')
     
     # Run the astrometry & photometry routine (unless --post-processing is passed as an argument)
     # This produces photometry.pkl (under the REDUCED directory tree), which contains the absolute
     # flux of every star across several aperture sizes, as well as the x/y positions and FWHM
     if not args.post_processing:
+        # Delete photometry.pkl if --overwrite is passed as an argument, but check first
+        if args.overwrite and os.path.exists(reduced_dir+'/photometry.pkl'):            
+            if bypass or input("Overwriting photometry.pkl! Press return to confirm, or any other key to exit: ") == '':
+                os.remove(reduced_dir+'/photometry.pkl')
+            else:
+                exit()
         get_photometry(tele,date_dirs[i])
     else:
         print("Skipping photometry...")
@@ -111,7 +123,7 @@ for i in range(len(date_dirs)):
         RA, DEC = PhotUtils.get_general_coords(targets[i],parser.parse(dates[i].isot))
         target_coords = [[RA,DEC]]
         
-        post_processing(tele,date_dirs[i].replace(dtype,'REDUCED'),targets[i],target_coords,overwrite=True)
+        post_processing(tele,reduced_dir,targets[i],target_coords,overwrite=True)
     else:
         print("Skipping post-processing...")
 

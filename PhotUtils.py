@@ -1571,7 +1571,7 @@ def get_exts(filename):
     exts = []
     im = fits.open(filename)
     for i in range(len(im)):
-        if im[0].data is not None:
+        if im[i].data is not None:
             exts.append(i)
     im.close()
     
