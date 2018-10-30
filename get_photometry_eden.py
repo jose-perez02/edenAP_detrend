@@ -20,10 +20,7 @@ def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry
     config = ConfigParser()
     config.read('config.ini')
     server_destination = config['FOLDER OPTIONS']['server_destination']
-
-    print('\t###################################')
-    print('\tPre-processing....')
-    print('\t###################################')
+    astrometry_timeout = float(config['ASTROMETRY OPTIONS']['timeout'])
     
     #Get all of the (good) files in datafolder and determine the filter
     files,filters=[],[]
@@ -65,10 +62,6 @@ def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry
     for filt in np.unique(filters):
         print("\t Found {:d} images with filter: {:s}".format((filters==filt).sum(),filt))
     
-    print('\n\t###################################')
-    print('\tGoing to photometric extraction....')
-    print('\t###################################')
-    
     # If it doesn't already exist, create the output directory for this data set
     outdir = datafolder.replace('/RAW/','/REDUCED/').replace('/CALIBRATED/','/REDUCED/')
     if not os.path.isdir(outdir):
@@ -76,8 +69,12 @@ def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry
     
     # Find photometry.pkl if it already exists
     if os.path.exists(outdir+'/photometry.pkl'):
-        print("\tFound photometry.pkl")
+        print("\t Found photometry.pkl")
         master_dict = pickle.load(open(outdir+'/photometry.pkl','rb'))
+        # If all of the images have been reduced then we can skip this one
+        if np.in1d(files,master_dict['frame_name']).all():
+            print("\t Photometry complete! Skipping...")
+            return
     else:
         master_dict = None
     
@@ -91,7 +88,7 @@ def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry
         # Perform the photometry for this chunk
         master_dict = PhotUtils.getPhotometry(chunked_files[i],target,telescope,filters,R,RA_d,Dec_d,outdir,None,
                                               get_astrometry=get_astrometry, refine_cen=ref_centers,
-                                              master_dict=master_dict)
+                                              astrometry_timeout=astrometry_timeout,master_dict=master_dict)
 
         # Save dictionary:
         print('\t Saving photometry at ' + outdir + '...')

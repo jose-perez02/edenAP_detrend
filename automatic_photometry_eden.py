@@ -34,7 +34,7 @@ REF_CENTERS = config['PHOTOMETRY OPTIONS'].getboolean('REF_CENTERS')
 
 # Parse arguments
 parserIO = argparse.ArgumentParser(description='Performs photometry and produces optimal light curves for all data from TELESCOPE within the past NDAYS.')
-parserIO.add_argument('-telescope',default=None,help='name of telescope (e.g., VATT)')
+parserIO.add_argument('-telescope',default=None,help='name(s) of telescopes (e.g., VATT)')
 parserIO.add_argument('-ndays',default=7,help='number of days to look back')
 parserIO.add_argument('-target',default=None,help='specify the target')
 parserIO.add_argument('--raw',action='store_true',help='look for data in the RAW directory instead of CALIBRATED')
@@ -101,11 +101,16 @@ bypass = False
 for i in range(len(date_dirs)):
     print("\nTarget: {:s} | Date: {:s}".format(targets[i],dates[i].iso.split()[0]))
     reduced_dir = date_dirs[i].replace(dtype,'REDUCED')
+    lightcurves_dir = date_dirs[i].replace(dtype,'LIGHTCURVES')
     
     # Run the astrometry & photometry routine (unless --post-processing is passed as an argument)
     # This produces photometry.pkl (under the REDUCED directory tree), which contains the absolute
     # flux of every star across several aperture sizes, as well as the x/y positions and FWHM
     if not args.post_processing:
+        print('\n\t###################################')
+        print('\tDoing photometry....')
+        print('\t###################################')
+        
         # Delete photometry.pkl if --overwrite is passed as an argument, but check first
         if args.overwrite and os.path.exists(reduced_dir+'/photometry.pkl'):            
             if bypass or input("Overwriting photometry.pkl! Press return to confirm, or any other key to exit: ") == '':
@@ -113,20 +118,39 @@ for i in range(len(date_dirs)):
                 bypass = True
             else:
                 exit()
+        
+        # Run the photometry routine
         get_photometry(tele,date_dirs[i])
+        
     else:
-        print("Skipping photometry...")
+        print('\n\t###################################')
+        print('\tSkipping photometry....')
+        print('\t###################################')
 
     # Run the post-processing routine (unless --photometry is passed as an argument)
     # Chooses the optimal aperture size & set of reference stars then creates a light curve
     if not args.photometry:
+        print('\n\t###################################')
+        print('\tDoing post-processing....')
+        print('\t###################################')
         # Get the target coordinates first (legacy)
         RA, DEC = PhotUtils.get_general_coords(targets[i],parser.parse(dates[i].isot))
         target_coords = [[RA,DEC]]
         
+        # Run the post-processing routine
         post_processing(tele,reduced_dir,targets[i],target_coords,overwrite=True,ncomp=6)
+        
+        # Copy all of the .epdlc files into the LIGHTCURVES directory
+        print('\t Copying lightcurves into {:s}'.format(lightcurves_dir))
+        if not os.path.isdir(lightcurves_dir):
+            os.makedirs(lightcurves_dir)
+        for filename in glob.glob(reduced_dir+'/post_processing/LC/*.epdlc'):
+            shutil.copyfile(filename,lightcurves_dir+'/'+filename.split('/')[-1])
+        
     else:
-        print("Skipping post-processing...")
+        print('\n\t###################################')
+        print('\tSkipping post-processing....')
+        print('\t###################################')
 
 
 
