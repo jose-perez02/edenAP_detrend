@@ -32,6 +32,7 @@ from astroquery.simbad import Simbad
 from photutils import CircularAperture, aperture_photometry
 from photutils import DAOStarFinder
 from photutils import make_source_mask
+from photutils.centroids import centroid_com
 from scipy import optimize
 from scipy.ndimage.filters import gaussian_filter
 
@@ -273,6 +274,7 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
     master_dict['LST'] = np.array([])
     master_dict['exptimes'] = np.array([])
     master_dict['airmasses'] = np.array([])
+    master_dict['filters'] = np.array([])
 
     # Generate a flux dictionary for each target.
     master_dict['data'] = {}
@@ -323,7 +325,7 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
     return master_dict
 
 
-def getPhotometry(filenames, target: str, telescope: str, R, ra_obj, dec_obj, out_data_folder, use_filter: str,
+def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, dec_obj, out_data_folder, use_filter: str,
                   get_astrometry=True, sitelong=None, sitelat=None, sitealt=None, refine_cen=False,
                   master_dict=None):
     # Define radius in which to search for targets (in degrees):
@@ -482,8 +484,8 @@ def getPhotometry(filenames, target: str, telescope: str, R, ra_obj, dec_obj, ou
         sitealt = 3191.
         exptime_h_name = 'EXPTIME'
         lst_h_name = None
-        t_scale_low = 0.3132  # wrong
-        t_scale_high = 0.3132 * 3  # wrong
+        t_scale_low = 0.05  # wrong
+        t_scale_high = 0.35 * 3  # wrong
         egain = 'GAIN'
     elif telescope == 'LOT':
         long_h_name = None
@@ -549,11 +551,12 @@ def getPhotometry(filenames, target: str, telescope: str, R, ra_obj, dec_obj, ou
                 filename = f.split('.fits')[0]
                 # astrometry will save the file in the /red folder
                 if f.startswith(server_destination):
-                    wcs_filepath = f.replace('cal', 'red')
+                    wcs_filepath = f.replace('/CALIBRATED/', '/REDUCED/').replace('/RAW/','/REDUCED/')
                     wcs_filepath = os.path.join(os.path.dirname(wcs_filepath),
                                                 'wcs_fits/',
                                                 os.path.basename(wcs_filepath))
                     wcs_filepath = wcs_filepath.replace('.fits', '.wcs.fits')
+                    
                     if not os.path.exists(os.path.dirname(wcs_filepath)):
                         os.makedirs(os.path.dirname(wcs_filepath))
                 else:
@@ -621,7 +624,7 @@ def getPhotometry(filenames, target: str, telescope: str, R, ra_obj, dec_obj, ou
                     coords = SkyCoord(str(RA) + ' ' + str(DEC), unit=(u.deg, u.deg))
                 except ValueError:
                     coords = SkyCoord(RA + ' ' + DEC, unit=(u.hourangle, u.deg))
-                # Save UTC, exposure, JD and BJD and LS times. Save also the airmass:
+                # Save UTC, exposure, JD and BJD and LS times. Also airmass and filter used.
                 master_dict['UTC_times'] = np.append(master_dict['UTC_times'], str(utc_time).replace(' ', 'T'))
                 master_dict['exptimes'] = np.append(master_dict['exptimes'], h0[exptime_h_name])
                 master_dict['JD_times'] = np.append(master_dict['JD_times'], t.jd)
@@ -643,6 +646,10 @@ def getPhotometry(filenames, target: str, telescope: str, R, ra_obj, dec_obj, ou
                 master_dict['airmasses'] = np.append(master_dict['airmasses'],
                                                      getAirmass(central_ra[0], central_dec[0], day, sitelong,
                                                                 sitelat, sitealt))
+                
+                # Save the filters
+                master_dict['filters'] = np.append(master_dict['filters'],filters)
+                
                 ########## OBTAINING THE FLUXES ###################
                 for ext in exts:
                     # Load the data:
@@ -694,6 +701,7 @@ def getPhotometry(filenames, target: str, telescope: str, R, ra_obj, dec_obj, ou
                         master_dict['data'][names_ext[i]]['background'] = extended_background
                         master_dict['data'][names_ext[i]]['background_err'] = extended_background_err
                         master_dict['data'][names_ext[i]]['fwhm'] = extended_fwhm
+                        
                         for j in range(len(R)):
                             idx_fluxes = 'fluxes_%d_pix_ap' % R[j]
                             idx_fluxes_err = 'fluxes_%d_pix_ap_err' % R[j]
@@ -864,7 +872,7 @@ def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale
     # setup gf_filepath for gaussian filtered file and final WCS filepath
     # MOD: JOSE. Save gf,wcs,etc files to /red/*/*/*/wcs_fits folder
     if server_work:
-        filename = filename.replace('cal', 'red')
+        filename = filename.replace('/CALIBRATED/','/REDUCED/').replace('/RAW/','/REDUCED/')
         filename = os.path.join(os.path.dirname(filename), 'wcs_fits/', os.path.basename(filename))
         gf_filepath = filename.replace('.fits', '_gf.fits')
         wcs_filepath = filename.replace('.fits', '.wcs.fits')
@@ -1039,6 +1047,40 @@ def SkyToPix(h, ras, decs):
     pix_coords = w.wcs_world2pix(sky_coords, 1)
     # Return x,y pixel coordinates:
     return pix_coords[:, 0], pix_coords[:, 1]
+
+
+def _moments_central(data, center=None, order=1):
+    """
+    Calculate the central image moments up to the specified order.
+    Parameters
+    ----------
+    data : 2D array-like
+        The input 2D array.
+    center : tuple of two floats or `None`, optional
+        The ``(x, y)`` center position.  If `None` it will calculated as
+        the "center of mass" of the input ``data``.
+    order : int, optional
+        The maximum order of the moments to calculate.
+    Returns
+    -------
+    moments : 2D `~numpy.ndarray`
+        The central image moments.
+    """
+
+    data = np.asarray(data).astype(float)
+
+    if data.ndim != 2:
+        raise ValueError('data must be a 2D array.')
+
+    if center is None:
+        center = centroid_com(data)
+
+    indices = np.ogrid[[slice(0, i) for i in data.shape]]
+    ypowers = (indices[0] - center[1]) ** np.arange(order + 1)
+    xpowers = np.transpose(indices[1] - center[0]) ** np.arange(order + 1)
+
+    return np.dot(np.dot(np.transpose(ypowers), data), xpowers)
+
 
 
 def getAperturePhotometry(d, h, x, y, R, target_names, frame_name=None, out_dir=None, saveplot=False,
@@ -1245,7 +1287,7 @@ def estimate_fwhm(data, x0, y0):
     x0_idx = int(x0) if x0 < data.shape[1] else data.shape[1] - 1
     sigma_y = get_second_moment(np.arange(data.shape[1]), data[y0_idx, :], x0)
     sigma_x = get_second_moment(np.arange(data.shape[0]), data[:, x0_idx], y0)
-    # Context: if sigma_x and sigma_y are not zero or NaN, then average them, else return the one that isn't zero
+    # Context: if sigma_x and sigma_y are not zero or NaN, then average them, else return the one that isn't zero/NaN
     sigma = (sigma_x + sigma_y) / 2. if sigma_x and sigma_y else sigma_y or sigma_x
     return gaussian_sigma_to_fwhm * sigma
 
@@ -1553,7 +1595,7 @@ def get_general_coords(target, date):
         result = Simbad.query_object(target_fixed)
         if result is None:
             # result is None when query fails
-            raise KeyError('Invalid target name in Simbad Query')
+            raise KeyError('Invalid target name in Simbad Query: %s' %target_fixed)
         else:
             # print("\t Simbad lookup successful for {:s}!".format(target_fixed))
             log("Simbad lookup successful for {:s}!".format(target_fixed))
@@ -1564,8 +1606,8 @@ def get_general_coords(target, date):
             ra, dec = manual_object_coords[target].split(' ')
             return ra, dec
         else:
-            # As a last resort:
-            return 'NoneFound', 'NoneFound'
+            # no other option but to raise err
+            raise
     else:
         # Assuming the Simbad query worked, load the coordinates:
         # Load positions as strings

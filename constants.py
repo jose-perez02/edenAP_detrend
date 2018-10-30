@@ -14,7 +14,7 @@ config.read('config.ini')
 server_destination = config['FOLDER OPTIONS']['server_destination']
 
 # STANDARD LIST OF TELESCOPES, UPDATE WHEN NEEDED
-telescopes_list = ["VATT", "BOK", "KUIPER", "SCHULMAN", "CHAT", "CASSINI", "CAHA"]
+telescopes_list = ["VATT", "BOK", "KUIPER", "SCHULMAN", "CHAT", "CASSINI", "CAHA", "LOT", "GUFI"]
 
 # Formatting/functions for logging
 FORMAT1 = "%(message)s"
@@ -32,7 +32,7 @@ def get_telescopes():
     Get the telescope names of the current ones in the server
     :return: list of telescope names
     """
-    telescope_dirs = iglob(os.path.join(server_destination, '*'))
+    telescope_dirs = iglob(os.path.join(server_destination, 'RAW/*'))
     telescopes = [telescope_dir.split('/')[-1] for telescope_dir in telescope_dirs]
     return telescopes
 
@@ -152,6 +152,16 @@ def LOOKDATE(header):
         date = find_val(header, 'DATE')
         temp_date = parser.parse(date)
     return temp_date
+
+
+# function to validate directory paths. It creates a path if it doesn't already exist.
+def validateDirs(*paths):
+    """
+    Validate directories. Create directory tree if it doesn't exist. Any number of arguments (paths) are valid.
+    """
+    for folder_path in paths:
+        if not os.path.isdir(folder_path):
+            os.makedirs(folder_path)
 
 
 # natural sorting technique
