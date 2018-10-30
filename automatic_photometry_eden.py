@@ -110,6 +110,7 @@ for i in range(len(date_dirs)):
         if args.overwrite and os.path.exists(reduced_dir+'/photometry.pkl'):            
             if bypass or input("Overwriting photometry.pkl! Press return to confirm, or any other key to exit: ") == '':
                 os.remove(reduced_dir+'/photometry.pkl')
+                bypass = True
             else:
                 exit()
         get_photometry(tele,date_dirs[i])
