@@ -1567,6 +1567,18 @@ def get_exts(filename):
     """
     Returns a list of the fits extensions containing data
     """
+    
+    exts = []
+    im = fits.open(filename)
+    for i in range(len(im)):
+        if im[0].data is not None:
+            exts.append(i)
+    im.close()
+    
+    return exts
+    
+    # Old method (not compatible with CAHA data; also assumes extension 0 is empty
+    """
     h = fits.getheader(filename)
     try:
         EXTEND = h['EXTEND']
@@ -1577,6 +1589,7 @@ def get_exts(filename):
     else:
         exts = [0]
     return exts
+    """
 
 
 def get_general_coords(target, date):

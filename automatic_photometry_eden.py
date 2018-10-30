@@ -59,10 +59,18 @@ if args.target is not None:
     target_names = simbad.Simbad.query_objectids(args.target)
     # If the lookup fails, exit; we don't want to reduce all of the targets!
     if target_names is None:
-        print("SIMBAD lookup failed for target {:s}, exiting...".format(args.target))
+        print("\nSIMBAD lookup failed for target {:s}, exiting...".format(args.target))
         exit()
     # Convert the astropy Table into a string array
     target_names = target_names.as_array().astype(str)
+    
+    # Replace double spaces (why are these in SIMBAD?) and replace spaces with underscores,
+    # to match the directory structure
+    target_names = [name.replace('  ',' ').replace(' ','_') for name in target_names]
+    
+    print("\nTarget {:s} identified by SIMBAD under the following names:".format(args.target))
+    print(target_names)
+    
 else:
     target_names = None
 
@@ -81,7 +89,7 @@ mask = np.in1d(targets,target_names)
 date_dirs,dates,targets = date_dirs[mask],dates[mask],targets[mask]
 
 # Print some info about the reduction to be performed
-print("Found {:d} data sets from within the past {:d} days under {:s}.".format(mask.sum(),ndays,dtype))
+print("\nFound {:d} data sets from within the past {:d} days under {:s}.".format(mask.sum(),ndays,dtype))
 print("Targets: "+", ".join(np.unique(targets)))
 
 # Loop through the directories
