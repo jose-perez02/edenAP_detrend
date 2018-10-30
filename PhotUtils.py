@@ -1,6 +1,7 @@
 import multiprocessing as mp
 import os
 import re
+import signal
 import subprocess
 import sys
 import time as clocking_time
@@ -326,8 +327,8 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
 
 
 def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, dec_obj, out_data_folder, use_filter: str,
-                  get_astrometry=True, sitelong=None, sitelat=None, sitealt=None, refine_cen=False,
-                  master_dict=None):
+                  get_astrometry=True, sitelong=None, sitelat=None, sitealt=None, refine_cen=False,astrometry_timeout=30,master_dict=None):
+                      
     # Define radius in which to search for targets (in degrees):
     search_radius = 0.25
 
@@ -564,7 +565,7 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
                 if not os.path.exists(wcs_filepath) and get_astrometry:
                     print('\t Calculating astrometry...')
                     run_astrometry(f, ra=ra_obj[0], dec=dec_obj[0], radius=0.5,
-                                   scale_low=t_scale_low, scale_high=t_scale_high)
+                                   scale_low=t_scale_low, scale_high=t_scale_high, astrometry_timeout=astrometry_timeout)
                     print('\t ...done!')
                 # Now get data if astrometry worked...
                 if os.path.exists(wcs_filepath) and get_astrometry:
@@ -574,7 +575,7 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
                 # ...or if no astrometry was needed on the frame:
                 elif not get_astrometry:
                     hdulist = fits.open(f)
-                # or if the astrometry ultimetely failed... skip file to avoid entering info in master_dict
+                # or if the astrometry ultimately failed... skip file and enter None values in the dict
                 else:
                     print("\t Skipping file " + f)
                     continue
@@ -850,7 +851,7 @@ def MedianCombine(ImgList, MB=None, flatten_counts=False):
         return np.median(data, axis=2), ronoise, gain
 
 
-def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale_high=1.):
+def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale_high=1., astrometry_timeout = 30):
     """
     This code runs Astrometry.net on a frame.
 
@@ -859,6 +860,8 @@ def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale
     * radius:     radius (in degrees) around the input guess ra,dec that astrometry should look for.
 
     * scale_[low, high]:     are scale limits (arcsec/pix) for the image.
+    
+    * astrometry_timeout:   maximum number of seconds to run astrometry.net (per attempt)
     """
     # flags
     success = False
@@ -901,8 +904,8 @@ def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale
         files = sorted(os.listdir(cal_dir), key=natural_keys)
 
         # sigma of gaussian filter, and astrometry's radius search are increased per loop
-        nsigmas = 5
-        nradii = 5
+        nsigmas = 3
+        nradii = 3
         sigmas = np.linspace(0, 10, nsigmas)
         radii = np.linspace(0.6, 1.2, nradii)
         log("Starting Astrometry on %s" % true_filename)
@@ -930,8 +933,32 @@ def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale
                         fits.update(gf_filepath, data, hdulist[ext].header, ext)
                     log("Executing Astrometry Code:")
                     log(temp_CODE)
-                    p = subprocess.Popen(temp_CODE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-                    p.wait()
+                    p = subprocess.Popen(temp_CODE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, preexec_fn=os.setsid)
+                    #p.wait() # Commented out - we *don't* want to wait if it's going to take forever
+                    
+                    # Log the start time
+                    t_proc_start = clocking_time.time()
+                    while True:
+                        # Check if the process has returned an error or created the file
+                        done = (p.returncode != 0 and p.returncode is not None) or (os.path.isfile(ext_fname))
+                        
+                        if not done:
+                            # How many seconds have elapsed?
+                            elapsed_time = clocking_time.time()-t_proc_start
+                            
+                            # Sleep for 1s
+                            clocking_time.sleep(1)
+                            
+                            # Kill the entire process group if the timeout is reached
+                            if elapsed_time>astrometry_timeout:
+                                print("\t\t Astrometry.net timed out after {:.0f} seconds! ({:d}/{:d} attempts)"\
+                                      .format(astrometry_timeout,count+1,nsigmas*nradii))
+                                os.killpg(os.getpgid(p.pid),signal.SIGINT)
+                                break
+                        else:
+                            p.wait() # Wait for astrometry.net to finish running, just in case
+                            break
+                    
                     if p.returncode != 0 and p.returncode is not None:
                         print('\t\t ASTROMETRY FAILED. The error was:')
                         out, err = p.communicate()
@@ -949,7 +976,7 @@ def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale
                     print("\t\t Astrometry was successful for ext " + str(ext))
                     log("Astrometry was successful for ext %d" % ext)
                     radii[0] = radii[i]
-                    break
+                    break 
             log("Total Number of Attempts: % d" % count)
             print("\t\t Total Number of Attempts: " + str(count))
             if not success:
@@ -995,7 +1022,7 @@ def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale
                     # fix up file name of latest WCS file
                     if server_work:
                         last_wcs_filename = os.path.join(cal_dir, last_filename).replace('.fits', '.wcs.fits')
-                        last_wcs_filename = last_wcs_filename.replace('cal', 'red')
+                        last_wcs_filename = last_wcs_filename.replace('/RAW/', '/REDUCED/').replace('/CALIBRATED/','/REDUCED/')
                         last_wcs_filename = os.path.join(os.path.dirname(last_wcs_filename),
                                                          'wcs_fits/',
                                                          os.path.basename(last_wcs_filename))
@@ -1005,6 +1032,7 @@ def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale
                     # does it exist?
                     isFile = os.path.isfile(last_wcs_filename)
                     if not isFile:
+                        print("\t\t Could not find previous frame {:}".format(last_wcs_filename))
                         # if reference file doesn't exit, skip this one
                         # doing this will avoid raising an exception and quitting photometry proccess
                         return 0
