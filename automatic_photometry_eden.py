@@ -76,7 +76,7 @@ else:
     target_names = None
 
 # Find all of the dates under RAW or CALIBRATED for this telescope
-date_dirs = np.sort(glob.glob(os.path.join(server_destination,dtype,tele,'*','*-*-*/')))
+date_dirs = np.sort(glob.glob(os.path.join(server_destination,dtype.replace('/',''),tele,'*','*-*-*/')))
 dates = np.array([Time(d.strip('/').split('/')[-1]) for d in date_dirs])
 
 # Filter these to dates which lie within ndays of today (ignore the time)
