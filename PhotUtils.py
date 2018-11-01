@@ -276,6 +276,7 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
     master_dict['exptimes'] = np.array([])
     master_dict['airmasses'] = np.array([])
     master_dict['filters'] = np.array([])
+    master_dict['source'] = np.array([])
 
     # Generate a flux dictionary for each target.
     master_dict['data'] = {}
@@ -650,6 +651,10 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
                 
                 # Save the filters
                 master_dict['filters'] = np.append(master_dict['filters'],filters)
+
+                # Save the data source (RAW or CALIBRATED)
+                source = 'RAW' if '/RAW/' in f[0] else 'CALIBRATED' if '/CALIBRATED/' in f[0] else 'unknown'
+                master_dict['source'] = np.append(master_dict['source'],source)
                 
                 ########## OBTAINING THE FLUXES ###################
                 for ext in exts:
