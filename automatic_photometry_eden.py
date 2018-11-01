@@ -31,7 +31,6 @@ server_destination = config['FOLDER OPTIONS']['server_destination']
 ASTROMETRY = config['PHOTOMETRY OPTIONS'].getboolean('ASTROMETRY')
 REF_CENTERS = config['PHOTOMETRY OPTIONS'].getboolean('REF_CENTERS')
 
-
 # Parse arguments
 parserIO = argparse.ArgumentParser(description='Performs photometry and produces optimal light curves for all data from TELESCOPE within the past NDAYS.')
 parserIO.add_argument('-telescope',default=None,help='name(s) of telescopes (e.g., VATT)')
@@ -52,15 +51,18 @@ if tele not in telescopes_list:
     exit()
 
 # Are we using RAW or CALIBRATED data?
-dtype = 'RAW' if args.raw else 'CALIBRATED'
+dtype = '/RAW/' if args.raw else '/CALIBRATED/'
 
 # Is the target specified?
 if args.target is not None:
+    # Do a SIMBAD lookup for this target name
     target_names = simbad.Simbad.query_objectids(args.target)
+    
     # If the lookup fails, exit; we don't want to reduce all of the targets!
     if target_names is None:
         print("\nSIMBAD lookup failed for target {:s}, exiting...".format(args.target))
         exit()
+        
     # Convert the astropy Table into a string array
     target_names = target_names.as_array().astype(str)
     
@@ -100,8 +102,8 @@ bypass = False
 # Loop through the directories
 for i in range(len(date_dirs)):
     print("\nTarget: {:s} | Date: {:s}".format(targets[i],dates[i].iso.split()[0]))
-    reduced_dir = date_dirs[i].replace(dtype,'REDUCED')
-    lightcurves_dir = date_dirs[i].replace(dtype,'LIGHTCURVES')
+    reduced_dir = date_dirs[i].replace(dtype,'/REDUCED/')
+    lightcurves_dir = date_dirs[i].replace(dtype,'/LIGHTCURVES/')
     
     # Run the astrometry & photometry routine (unless --post-processing is passed as an argument)
     # This produces photometry.pkl (under the REDUCED directory tree), which contains the absolute
