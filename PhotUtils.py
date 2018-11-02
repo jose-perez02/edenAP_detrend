@@ -570,9 +570,16 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
                     print('\t ...done!')
                 # Now get data if astrometry worked...
                 if os.path.exists(wcs_filepath) and get_astrometry:
-                    # If get_astrometry flag is on, prefer the generated file instead of the original:
+                    # If get_astrometry flag is on, load the header from the WCS-solved image onto the input data
+                    # (Don't just use the WCS solved image; this way we can change between RAW and CALIBRATED input types
+                    # without having to redo the astrometry)
                     print('\t Detected file ' + wcs_filepath + '. Using it...')
-                    hdulist = fits.open(wcs_filepath)
+                    hdulist = fits.open(f)
+                    hdulist_wcs = fits.open(wcs_filepath)
+                    for ext in exts:
+                        hdulist[ext].header = hdulist_wcs[ext].header
+                    hdulist_wcs.close()
+                    
                 # ...or if no astrometry was needed on the frame:
                 elif not get_astrometry:
                     hdulist = fits.open(f)
