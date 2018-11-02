@@ -300,9 +300,12 @@ def save_trendStats(epdlc_path, output_folder: str, rmag_delta=0.5, mag_delta=0.
         ax.autoscale(True, axis='both', tight=True)
     fig.suptitle(starID, y=1.05)
     plt.tight_layout()
-    axes[0, 1].set_ylim(rmag_lim)
-    axes[1, 0].set_ylim(mag_lim)
-    axes[1, 1].set_ylim(mag_lim)
+    try:
+        axes[0, 1].set_ylim(rmag_lim)
+        axes[1, 0].set_ylim(mag_lim)
+        axes[1, 1].set_ylim(mag_lim)
+    except:
+        pass
     fig.savefig(airmass_savepath, dpi=200, bbox_inches='tight')
     # end airmass plots
     plt.close()
@@ -324,9 +327,12 @@ def save_trendStats(epdlc_path, output_folder: str, rmag_delta=0.5, mag_delta=0.
         ax.autoscale(True, axis='both', tight=True)
     fig.suptitle(starID, y=1.05)
     plt.tight_layout()
-    axes[0, 1].set_ylim(rmag_lim)
-    axes[1, 0].set_ylim(mag_lim)
-    axes[1, 1].set_ylim(mag_lim)
+    try:
+        axes[0, 1].set_ylim(rmag_lim)
+        axes[1, 0].set_ylim(mag_lim)
+        axes[1, 1].set_ylim(mag_lim)
+    except:
+        pass    
     fig.savefig(fwhm_savepath, dpi=200, bbox_inches='tight')
     # end seeing plots
     plt.close()
@@ -351,9 +357,12 @@ def save_trendStats(epdlc_path, output_folder: str, rmag_delta=0.5, mag_delta=0.
         ax.autoscale(True, axis='both', tight=True)
     fig.suptitle(starID + '\nDistance: Distance from median center', y=1.1)
     plt.tight_layout()
-    axes[0, 1].set_ylim(rmag_lim)
-    axes[1, 0].set_ylim(mag_lim)
-    axes[1, 1].set_ylim(mag_lim)
+    try:
+        axes[0, 1].set_ylim(rmag_lim)
+        axes[1, 0].set_ylim(mag_lim)
+        axes[1, 1].set_ylim(mag_lim)
+    except:
+        pass    
     fig.savefig(distance_savepath, dpi=200, bbox_inches='tight')
     # end distance plots
     plt.close()
