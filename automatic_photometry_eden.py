@@ -139,15 +139,18 @@ for i in range(len(date_dirs)):
         RA, DEC = PhotUtils.get_general_coords(targets[i],parser.parse(dates[i].isot))
         target_coords = [[RA,DEC]]
         
-        # Run the post-processing routine
-        post_processing(tele,reduced_dir,targets[i],target_coords,overwrite=True,ncomp=6)
-        
-        # Copy all of the .epdlc files into the LIGHTCURVES directory
-        print('\t Copying lightcurves into {:s}'.format(lightcurves_dir))
-        if not os.path.isdir(lightcurves_dir):
-            os.makedirs(lightcurves_dir)
-        for filename in glob.glob(reduced_dir+'/post_processing/LC/*.epdlc'):
-            shutil.copyfile(filename,lightcurves_dir+'/'+filename.split('/')[-1])
+        # Run the post-processing routine (if photometry was successful)
+        if os.path.exists(reduced_dir+'/photometry.pkl'): 
+            post_processing(tele,reduced_dir,targets[i],target_coords,overwrite=True,ncomp=6)
+            
+            # Copy all of the .epdlc files into the LIGHTCURVES directory
+            print('\t Copying lightcurves into {:s}'.format(lightcurves_dir))
+            if not os.path.isdir(lightcurves_dir):
+                os.makedirs(lightcurves_dir)
+            for filename in glob.glob(reduced_dir+'/post_processing/LC/*.epdlc'):
+                shutil.copyfile(filename,lightcurves_dir+'/'+filename.split('/')[-1])
+        else:
+            print('\t No photometry.pkl found - run the photometry routine first!')
         
     else:
         print('\n\t###################################')
