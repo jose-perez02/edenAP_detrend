@@ -965,7 +965,11 @@ def run_astrometry(filename,exts, ra=None, dec=None, radius=0.5, scale_low=0.1, 
                             if elapsed_time>astrometry_timeout:
                                 print("\t\t Astrometry.net timed out after {:.0f} seconds! ({:d}/{:d} attempts)"\
                                       .format(astrometry_timeout,count+1,nsigmas*nradii))
-                                os.killpg(os.getpgid(p.pid),signal.SIGINT)
+                                try:
+                                    os.killpg(os.getpgid(p.pid),signal.SIGINT)
+                                except ProcessLookupError:
+                                    # On OS X the above line fails for some reason; this will just skip killing the process
+                                    pass
                                 break
                         else:
                             p.wait() # Wait for astrometry.net to finish running, just in case
