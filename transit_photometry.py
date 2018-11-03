@@ -657,7 +657,7 @@ def plot_images(data, idx, idx_comparison, aperture, min_ap, max_ap,
     nframes = len(frames)
     for i in range(nframes):
         for ext in exts:
-            frame: str = frames[i]
+            frame: str = server_destination+'/'+frames[i]
             # temporary fix to underscore mislabeling
             if not os.path.isfile(frame):
                 frame = frame.replace(' ', '_')
@@ -757,7 +757,7 @@ def post_processing(telescope,datafolder,target_name,target_coords,band='ip',nco
     all_cameras = len(data['frame_name']) * [[]]
 
     for i in range(len(data['frame_name'])):
-        frames = data['frame_name'][i]
+        frames = server_destination+'/'+data['frame_name'][i]
         if not os.path.exists(frames):
             frames = frames.replace(' ', '_')
         with fits.open(frames) as hdulist:
