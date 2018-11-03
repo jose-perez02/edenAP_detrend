@@ -191,13 +191,15 @@ for i in range(len(date_dirs)):
 # At the end, print which data sets failed
 if len(failed_phot)>0 or len(failed_post)>0:
     print("The following data sets FAILED to reduce:")
+    log("The following data sets FAILED to reduce:")
 if len(failed_phot)>0:
-    string = ["({:s}/{:s}/{:s}".format(tele,targets[i],dates[i].iso.split()[0]) for i in failed_phot]
+    string = ["({:s}/{:s}/{:s})".format(tele,targets[i],dates[i].iso.split()[0]) for i in failed_phot]
     print("Photometry:  {:s}".format('  '.join(string)))
+    log("Photometry:  {:s}".format('  '.join(string)))
 if len(failed_post)>0:
-    string = ["({:s}/{:s}/{:s}".format(tele,targets[i],dates[i].iso.split()[0]) for i in failed_post]
+    string = ["({:s}/{:s}/{:s})".format(tele,targets[i],dates[i].iso.split()[0]) for i in failed_post]
     print("Post-processing:  {:s}".format('  '.join(string)))
-    
+    log("Post-processing:  {:s}".format('  '.join(string)))
 
 
 
