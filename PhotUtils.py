@@ -616,9 +616,10 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
                         sitealt = h0[alt_h_name]
                     first_time = False
 
-                # Save filename to master dictionary:
-                log('SETTING A FILENAME TO frame_name key in master_dict\t %s' % f)
-                master_dict['frame_name'] = np.append(master_dict['frame_name'], f)
+                # Save filename to master dictionary
+                # Remove the server root; this way it works on multiple computers with different mount points
+                log('SETTING A FILENAME TO frame_name key in master_dict\t %s' % f.replace(server_destination,''))
+                master_dict['frame_name'] = np.append(master_dict['frame_name'], f.replace(server_destination,''))
 
                 ########## OBTAINING THE TIMES OF OBSERVATION ####################
                 # Get the BJD time. First, add exposure time:

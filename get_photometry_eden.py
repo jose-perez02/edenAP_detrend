@@ -72,7 +72,8 @@ def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry
         print("\t Found photometry.pkl")
         master_dict = pickle.load(open(outdir+'/photometry.pkl','rb'))
         # If all of the images have been reduced then we can skip this one
-        if np.in1d(files,master_dict['frame_name']).all():
+        frame_name = [filename.replace(server_destination,'') for filename in files]
+        if np.in1d(frame_name,master_dict['frame_name']).all():
             print("\t Photometry complete! Skipping...")
             return
     else:
