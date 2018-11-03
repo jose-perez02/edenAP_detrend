@@ -7,6 +7,7 @@ import glob
 import numpy as np
 import os
 import shutil
+import traceback
 
 # Wrapper script for the photometry and post-processing scripts.
 
@@ -20,6 +21,7 @@ from astropy import units as u
 from astropy.time import Time
 from astroquery import simbad
 
+from constants import log
 from get_photometry_eden import get_photometry
 import PhotUtils
 from transit_photometry import post_processing
@@ -99,9 +101,12 @@ print("Targets: "+", ".join(np.unique(targets)))
 # Overwrite bypass (will double-check once)
 bypass = False
 
-# Loop through the directories
+# Loop through the directories; save the data sets which fail with exceptions
+failed_phot = []
+failed_post = []
 for i in range(len(date_dirs)):
     print("\nTarget: {:s} | Date: {:s}".format(targets[i],dates[i].iso.split()[0]))
+    log("Now working on {:s}".format(date_dirs[i]))
     reduced_dir = date_dirs[i].replace(dtype,'/REDUCED/')
     lightcurves_dir = date_dirs[i].replace(dtype,'/LIGHTCURVES/')
     
@@ -117,13 +122,24 @@ for i in range(len(date_dirs)):
         if args.overwrite and os.path.exists(reduced_dir+'/photometry.pkl'):            
             if bypass or input("Overwriting photometry.pkl! Press return to confirm, or any other key to exit: ") == '':
                 os.remove(reduced_dir+'/photometry.pkl')
+                log("Removing {:s}".format(reduced_dir+'/photometry.pkl'))
                 bypass = True
             else:
                 exit()
-        
-        # Run the photometry routine
-        get_photometry(tele,date_dirs[i])
-        
+                
+        # Try to run photometry, but skip this data set if it fails
+        try:
+            # Run the photometry routine
+            get_photometry(tele,date_dirs[i])
+        except (KeyboardInterrupt,SystemExit):
+            raise
+        except:
+            e = sys.exc_info()
+            print("\t Photometry FAILED with error type: {0}".format(e[0]))
+            print("\t See the log for more information.")
+            log("\t Photometry failed for {:s} with the following error:".format(date_dirs[i]))
+            log(traceback.print_exception(*e))
+            failed_phot.append(i)
     else:
         print('\n\t###################################')
         print('\tSkipping photometry....')
@@ -140,15 +156,29 @@ for i in range(len(date_dirs)):
         target_coords = [[RA,DEC]]
         
         # Run the post-processing routine (if photometry was successful)
-        if os.path.exists(reduced_dir+'/photometry.pkl'): 
-            post_processing(tele,reduced_dir,targets[i],target_coords,overwrite=True,ncomp=6)
+        if os.path.exists(reduced_dir+'/photometry.pkl'):
+            # Try to do the post-processing, but except errors and continue
+            try:
+                # Run the post-processing routine
+                post_processing(tele,reduced_dir,targets[i],target_coords,overwrite=True,ncomp=6)
+                
+                # Copy all of the .epdlc files into the LIGHTCURVES directory
+                print('\t Copying lightcurves into {:s}'.format(lightcurves_dir))
+                if not os.path.isdir(lightcurves_dir):
+                    os.makedirs(lightcurves_dir)
+                for filename in glob.glob(reduced_dir+'/post_processing/LC/*.epdlc'):
+                    shutil.copyfile(filename,lightcurves_dir+'/'+filename.split('/')[-1])
+            except (KeyboardInterrupt,SystemExit):
+                raise
+            except:
+                e = sys.exc_info()
+                print("\t Post-processing FAILED with error type: {0}".format(e[0]))
+                print("\t See the log for more information.")
+                log("\t Post-processing failed for {:s} with the following error:".format(date_dirs[i]))
+                log(traceback.print_exception(*e))
+                failed_post.append(i)
             
-            # Copy all of the .epdlc files into the LIGHTCURVES directory
-            print('\t Copying lightcurves into {:s}'.format(lightcurves_dir))
-            if not os.path.isdir(lightcurves_dir):
-                os.makedirs(lightcurves_dir)
-            for filename in glob.glob(reduced_dir+'/post_processing/LC/*.epdlc'):
-                shutil.copyfile(filename,lightcurves_dir+'/'+filename.split('/')[-1])
+
         else:
             print('\t No photometry.pkl found - run the photometry routine first!')
         
@@ -157,7 +187,16 @@ for i in range(len(date_dirs)):
         print('\tSkipping post-processing....')
         print('\t###################################')
 
-
+# At the end, print which data sets failed
+if len(failed_phot)>0 or len(failed_post)>0:
+    print("The following data sets FAILED to reduce:")
+if len(failed_phot)>0:
+    string = ["({:s}/{:s}/{:s}".format(tele,targets[i],dates[i].iso.split()[0]) for i in failed_phot]
+    print("Photometry:  {:s}".format('  '.join(string)))
+if len(failed_post)>0:
+    string = ["({:s}/{:s}/{:s}".format(tele,targets[i],dates[i].iso.split()[0]) for i in failed_post]
+    print("Post-processing:  {:s}".format('  '.join(string)))
+    
 
 
 
