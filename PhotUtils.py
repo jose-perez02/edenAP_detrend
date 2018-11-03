@@ -536,7 +536,7 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
                 fitsok = False
         if fitsok:
             h0 = hdulist[0].header  # primary fits header
-            exts = get_exts(f)
+            exts = get_exts(hdulist)
             # Check filter:
             filter_ok = False
             if use_filter is None:
@@ -565,7 +565,7 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
                     wcs_filepath = f.replace('.fits', '.wcs.fits')
                 if not os.path.exists(wcs_filepath) and get_astrometry:
                     print('\t Calculating astrometry...')
-                    run_astrometry(f, ra=ra_obj[0], dec=dec_obj[0], radius=0.5,
+                    run_astrometry(f, exts,ra=ra_obj[0], dec=dec_obj[0], radius=0.5,
                                    scale_low=t_scale_low, scale_high=t_scale_high, astrometry_timeout=astrometry_timeout)
                     print('\t ...done!')
                 # Now get data if astrometry worked...
@@ -863,7 +863,7 @@ def MedianCombine(ImgList, MB=None, flatten_counts=False):
         return np.median(data, axis=2), ronoise, gain
 
 
-def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale_high=1., astrometry_timeout = 30):
+def run_astrometry(filename,exts, ra=None, dec=None, radius=0.5, scale_low=0.1, scale_high=1., astrometry_timeout = 30):
     """
     This code runs Astrometry.net on a frame.
 
@@ -881,7 +881,6 @@ def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale
     server_work = True if filename.startswith(server_destination) else False
 
     true_filename = filename
-    exts = get_exts(filename)
     print('\t\t Found {:} extensions'.format(len(exts)))
 
     # setup gf_filepath for gaussian filtered file and final WCS filepath
@@ -1608,17 +1607,26 @@ class Time(time.Time):
         return self.tdb + dt
 
 
-def get_exts(filename):
+def get_exts(hdulist):
     """
     Returns a list of the fits extensions containing data
     """
     
+    # If the input isn't an HDUList then assume it is a filename and open the file
+    if type(hdulist) is not fits.HDUList:
+        hdulist = fits.open(hdulist)
+        close = True
+    else:
+        close = False
+    
     exts = []
-    im = fits.open(filename)
-    for i in range(len(im)):
-        if im[i].data is not None:
+    for i in range(len(hdulist)):
+        if hdulist[i].data is not None:
             exts.append(i)
-    im.close()
+    
+    # If the input wasn't an HDUList, then close the image
+    if close:
+        im.close()
     
     return exts
     
