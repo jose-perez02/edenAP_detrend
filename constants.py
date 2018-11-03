@@ -3,18 +3,19 @@ import os
 import re
 from configparser import ConfigParser
 from glob import iglob
+import numpy as np
 
 import jdcal
 from astropy.io import fits
 from dateutil import parser
 
-# This is the server destination in the current computer
-config = ConfigParser()
-config.read('config.ini')
-server_destination = config['FOLDER OPTIONS']['server_destination']
-
 # STANDARD LIST OF TELESCOPES, UPDATE WHEN NEEDED
 telescopes_list = ["VATT", "BOK", "KUIPER", "SCHULMAN", "CHAT", "CASSINI", "CAHA", "LOT", "GUFI"]
+
+# String, float, int types
+str_types = [str,np.str,np.str_]
+float_types = [float,np.float,np.float64,np.float_]
+int_types = [int,np.int,np.int64,np.int_]
 
 # Formatting/functions for logging
 FORMAT1 = "%(message)s"
@@ -25,6 +26,17 @@ if not os.path.isdir(log_folder):
 logging.basicConfig(filename=os.path.join(log_folder, 'edenAP.log'), format=FORMAT1, level=logging.INFO)
 log = logging.info
 
+# This is the server destination in the current computer
+config = ConfigParser()
+config.read(edenAP_path+'/config.ini')
+server_destination = config['FOLDER OPTIONS']['server_destination']
+
+# Open filters.dat to determine the filter sets
+filter_sets = {}
+for line in open(edenAP_path+'/filters.dat','r').readlines():
+    if line.strip() == '' or line.strip()[0] == '#': continue
+    keys = line.strip().split()
+    filter_sets[keys[0]] = keys
 
 # Server localizers
 def get_telescopes():
@@ -177,3 +189,18 @@ def natural_keys(text):
     (See Toothy's implementation in the comments)
     '''
     return [atoi(c) for c in re.split('(\d+)', text)]
+
+# Identifies filters by their preferred name using the filters.dat file
+# If the filter is not identified in filters.dat, just return the input
+def id_filters(filters):
+    if type(filters) in str_types:
+        out = np.copy([filters])
+    else:
+        out = np.copy(filters)
+    for key in filter_sets:
+        out[np.in1d(out,filter_sets[key])] = key
+    if type(filters) in str_types:
+        return out[0]
+    else:
+        return out
+

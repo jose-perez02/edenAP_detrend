@@ -1,0 +1,8 @@
+# Each line is a unique filter; all of the filters in a line will be listed under the first name in pipeline products.
+# Case-sensitive!
+
+clear	Clear	open	Open	blank	Blank	empty	Empty	none	None
+F814W	WFPC2f814W	WFPC2F814W
+R	BESSEL-R
+I	BESSEL-I	ARIZONA-I
+i'	Sloan-i
