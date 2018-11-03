@@ -17,6 +17,11 @@ str_types = [str,np.str,np.str_]
 float_types = [float,np.float,np.float64,np.float_]
 int_types = [int,np.int,np.int64,np.int_]
 
+# Suppress astropy warnings
+import warnings
+from astropy.utils.exceptions import AstropyWarning
+warnings.simplefilter('ignore',category=AstropyWarning)
+
 # Formatting/functions for logging
 FORMAT1 = "%(message)s"
 edenAP_path = os.path.abspath(os.path.dirname(__file__))
