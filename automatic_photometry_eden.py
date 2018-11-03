@@ -7,6 +7,7 @@ import glob
 import numpy as np
 import os
 import shutil
+import sys
 import traceback
 
 # Wrapper script for the photometry and post-processing scripts.
