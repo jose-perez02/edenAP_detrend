@@ -532,7 +532,7 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
             fitsok = False
         # If frame already reduced, skip it:
         if updating_dict:
-            if f in master_dict['frame_name']:
+            if f.replace(server_destination,'') in master_dict['frame_name']:
                 fitsok = False
         if fitsok:
             h0 = hdulist[0].header  # primary fits header
