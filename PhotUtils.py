@@ -551,7 +551,7 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
                 ########## OBTAINING THE ASTROMETRY ###############
                 # First, run astrometry on the current frame if not ran already:
                 filename = f.split('.fits')[0]
-                # astrometry will save the file in the /red folder
+                # astrometry will save the file in the /REDUCED/ folder
                 if f.startswith(server_destination):
                     wcs_filepath = f.replace('/CALIBRATED/', '/REDUCED/').replace('/RAW/','/REDUCED/')
                     wcs_filepath = os.path.join(os.path.dirname(wcs_filepath),
@@ -1059,7 +1059,12 @@ def run_astrometry(filename, ra=None, dec=None, radius=0.5, scale_low=0.1, scale
                 # If it works, remove the single-extension astrometry file
                 else:
                     os.remove(ext_fname)
-            # Save the original file with the WCS info
+            
+            # Strip the data from the WCS solution to save space
+            for ext in exts:
+                hdulist[ext].data = None
+            
+            # Save the original headers with the WCS info
             hdulist.writeto(wcs_filepath)
 
         # Save space by removing the gaussian filtered image, if any
