@@ -71,15 +71,18 @@ def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
     
-    # Find photometry.pkl if it already exists
+    # Find photometry.pkl if it already exists (and isn't empty)
     if os.path.exists(outdir+'/photometry.pkl'):
-        print("\t Found photometry.pkl")
         master_dict = pickle.load(open(outdir+'/photometry.pkl','rb'))
-        # If all of the images have been reduced then we can skip this one
-        frame_name = [filename.replace(server_destination,'') for filename in files]
-        if 'frame_name' in master_dict.keys() and np.in1d(frame_name,master_dict['frame_name']).all():
-            print("\t Photometry complete! Skipping...")
-            return
+        if master_dict == {}:
+            master_dict = None
+        else:
+            print("\t Found photometry.pkl")
+            # If all of the images have been reduced then we can skip this one
+            frame_name = [filename.replace(server_destination,'') for filename in files]
+            if 'frame_name' in master_dict.keys() and np.in1d(frame_name,master_dict['frame_name']).all():
+                print("\t Photometry complete! Skipping...")
+                return
     else:
         master_dict = None
     
