@@ -1664,6 +1664,9 @@ def get_general_coords(target, date):
         target_fixed = target.replace('_', ' ')
         log("Querying Simbad Target: %s" % target_fixed)
         result = Simbad.query_object(target_fixed)
+        # If none, try again with a dash
+        if result is None:
+            result = Simbad.query_object(target_fixed.replace(' ','-'))
         if result is None:
             # result is None when query fails
             raise KeyError('Invalid target name in Simbad Query: %s' %target_fixed)

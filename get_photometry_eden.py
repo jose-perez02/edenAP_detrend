@@ -47,8 +47,8 @@ def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry
             
             # Get RA, Dec either through the header (preferred) or by target lookup    
             try:
-                RA = find_val(h0,'RA')
-                Dec = find_val(h0,'DEC')
+                RA = find_val(h,'RA')
+                Dec = find_val(h,'DEC')
             except:
                 RA, Dec = PhotUtils.get_general_coords(target,date)            
                 if RA == 'NoneFound':
