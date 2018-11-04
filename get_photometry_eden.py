@@ -45,12 +45,16 @@ def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry
             target = h['OBJECT']
             date = LOOKDATE(h)
             
-            # Get RA, Dec either by target lookup (preferred) or through the header    
-            RA, Dec = PhotUtils.get_general_coords(target, date)
-            if RA == 'NoneFound':
+            # Get RA, Dec either through the header (preferred) or by target lookup    
+            try:
                 RA = find_val(h0,'RA')
                 Dec = find_val(h0,'DEC')
-                
+            except:
+                RA, Dec = PhotUtils.get_general_coords(target,date)            
+                if RA == 'NoneFound':
+                    print("\t Unable to find coordinates!")
+                    return
+    
             # Convert RA and DECs of object to decimal degrees:
             RA_d,Dec_d = PhotUtils.CoordsToDecimal([[RA,Dec]])
             

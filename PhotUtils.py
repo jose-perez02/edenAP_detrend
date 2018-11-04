@@ -424,8 +424,8 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
         alt_h_name = 'ALT-OBS'
         exptime_h_name = 'EXPTIME'
         lst_h_name = 'ST'
-        t_scale_low = 0.32
-        t_scale_high = 0.32 * 3
+        t_scale_low = 0.25
+        t_scale_high = 0.35
         egain = 1.28
 
     elif telescope == 'VATT':
@@ -926,12 +926,12 @@ def run_astrometry(filename,exts, ra=None, dec=None, radius=0.5, scale_low=0.1, 
             print('\t\t Working on extension {:}...'.format(ext))
             ext_fname = gf_filepath.replace('.fits', '_' + str(ext) + '.wcs.fits')
             if (ra is not None) and (dec is not None) and (radius is not None):
-                CODE = '{} --continue --no-plots --downsample 2 --cpulimit 60 --extension "{}" ' \
+                CODE = '{} --continue --no-plots --downsample 2 -d 50 --cpulimit 60 --extension "{}" ' \
                        '--scale-units arcsecperpix --scale-low {} --scale-high {} --ra {} ' \
                        '--dec {} --radius {} --new-fits "{}" "{}"'.format(astrometry_path, ext, scale_low, scale_high,
                                                                           ra, dec, 'FIXME', ext_fname, gf_filepath)
             else:
-                CODE = '{} --continue --no-plots --downsample 2 --cpulimit 60 --extension "{}" ' \
+                CODE = '{} --continue --no-plots --downsample 2 -d 50 --cpulimit 60 --extension "{}" ' \
                        '--scale-units arcsecperpix --scale-low ' \
                        '{} --scale-high {} --new-fits "{}" "{}"'.format(astrometry_path, ext, scale_low, scale_high,
                                                                         ext_fname, gf_filepath)
