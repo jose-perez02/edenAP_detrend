@@ -61,20 +61,22 @@ if args.target is not None:
     # Do a SIMBAD lookup for this target name
     target_names = simbad.Simbad.query_objectids(args.target)
     
-    # If the lookup fails, exit; we don't want to reduce all of the targets!
+    # If the lookup fails, just use the argument target name
     if target_names is None:
-        print("\nSIMBAD lookup failed for target {:s}, exiting...".format(args.target))
-        exit()
+        print("\nSIMBAD lookup failed for target {:s}".format(args.target))
+        target_names = [args.target]
+    else:
+        # Convert the astropy Table into a string array
+        target_names = target_names.as_array().astype(str)
         
-    # Convert the astropy Table into a string array
-    target_names = target_names.as_array().astype(str)
-    
-    # Replace double spaces (why are these in SIMBAD?)
-    target_names = [name.replace('  ',' ') for name in target_names]
-    
-    print("\nTarget {:s} identified by SIMBAD under the following names:".format(args.target))
-    print(target_names)
-    
+        # Replace double spaces (why are these in SIMBAD?)
+        target_names = [name.replace('  ',' ') for name in target_names]
+        
+        print("\nTarget {:s} identified by SIMBAD under the following names:".format(args.target))
+        print(target_names)
+        
+        # Append the argument target name as well, in case it isn't in this list
+        target_names.append(args.target)
 else:
     target_names = None
 
