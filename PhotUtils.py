@@ -916,10 +916,10 @@ def run_astrometry(filename,exts, ra=None, dec=None, radius=0.5, scale_low=0.1, 
         files = sorted(os.listdir(cal_dir), key=natural_keys)
 
         # sigma of gaussian filter, and astrometry's radius search are increased per loop
-        nsigmas = 3
-        nradii = 3
-        sigmas = np.linspace(0, 10, nsigmas)
-        radii = np.linspace(0.6, 1.2, nradii)
+        nsigmas = 2
+        nradii = 2
+        sigmas = np.linspace(0, 5, nsigmas)
+        radii = np.linspace(0.6, 1.8, nradii)
         log("Starting Astrometry on %s" % true_filename)
         astrometry_path = os.path.join(astrometry_directory, 'solve-field')
         for ext in exts:
