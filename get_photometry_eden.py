@@ -49,7 +49,16 @@ def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry
             try:
                 RA = find_val(h,'RA')
                 Dec = find_val(h,'DEC')
+                # Ensure that RA,Dec are floats
+                try:
+                    float(RA)
+                    float(Dec)
+                except ValueError:
+                    RA,Dec = None, None
             except:
+                RA,Dec = None,None
+            
+            if RA is None or Dec is None:
                 RA, Dec = PhotUtils.get_general_coords(target,date)            
                 if RA == 'NoneFound':
                     print("\t Unable to find coordinates!")
