@@ -214,10 +214,10 @@ def get_dict(target, central_ra, central_dec, central_radius, ra_obj, dec_obj,
     print('\t > Generating master dictionary for coordinates', central_ra, central_dec, '...')
     # Make query to 2MASS:
     result = Irsa.query_region(coord.SkyCoord(central_ra, central_dec, unit=(u.deg, u.deg)),
-                               spatial='Cone', radius=central_radius * 3600. * u.arcsec, catalog=catalog)
+                               spatial='Cone', radius=central_radius * 5400. * u.arcsec, catalog=catalog)
     # Query to PPMXL to get proper motions:
     resultppm = Irsa.query_region(coord.SkyCoord(central_ra, central_dec, unit=(u.deg, u.deg)),
-                                  spatial='Cone', radius=central_radius * 3600. * u.arcsec, catalog='ppmxl')
+                                  spatial='Cone', radius=central_radius * 5400. * u.arcsec, catalog='ppmxl')
 
     # Get RAs, DECs, and PMs from this last catalog:
     rappmxl = resultppm['ra'].data.data
@@ -590,8 +590,13 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
                 # Create master dictionary and define data to be used in the code:    
                 if first_time:
                     date_time = LOOKDATE(h0)  # datetime object
-                    central_ra, central_dec = CoordsToDecimal([[find_val(h0, 'RA'),
-                                                                find_val(h0, 'DEC')]])
+                    try:
+                        central_ra, central_dec = CoordsToDecimal([[find_val(h0, 'RA'),
+                                                                    find_val(h0, 'DEC')]])
+                    except ValueError:
+                        # If there's no RA, Dec in the header, just use the target RA, Dec
+                        central_ra, central_dec = ra_obj, dec_obj
+                    
                     if not updating_dict:
                         master_dict = get_dict(target, central_ra[0], central_dec[0], search_radius,
                                                ra_obj, dec_obj, hdulist, exts, R, date=date_time.date())
@@ -633,7 +638,12 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
                     float(RA)
                     coords = SkyCoord(str(RA) + ' ' + str(DEC), unit=(u.deg, u.deg))
                 except ValueError:
-                    coords = SkyCoord(RA + ' ' + DEC, unit=(u.hourangle, u.deg))
+                    # if there is a colon in the values, assume sexagesimal
+                    if ':' in RA and ':' in DEC:
+                        coords = SkyCoord(RA + ' ' + DEC, unit=(u.hourangle, u.deg))
+                    # Otherwise use the target coordinates
+                    else:
+                        coords = SkyCoord(str(ra_obj) + ' ' + str(dec_obj), unit=(u.deg,u.deg))
                 # Save UTC, exposure, JD and BJD and LS times. Also airmass and filter used.
                 master_dict['UTC_times'] = np.append(master_dict['UTC_times'], str(utc_time).replace(' ', 'T'))
                 master_dict['exptimes'] = np.append(master_dict['exptimes'], h0[exptime_h_name])

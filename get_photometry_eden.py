@@ -49,12 +49,13 @@ def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry
             try:
                 RA = find_val(h,'RA')
                 Dec = find_val(h,'DEC')
-                # Ensure that RA,Dec are floats
+                # Ensure that RA,Dec are floats or sexagesimal
                 try:
                     float(RA)
                     float(Dec)
                 except ValueError:
-                    RA,Dec = None, None
+                    if ':' not in RA or ':' not in Dec:
+                        RA,Dec = None, None
             except:
                 RA,Dec = None,None
             
