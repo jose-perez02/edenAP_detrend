@@ -595,7 +595,7 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
                                                                     find_val(h0, 'DEC')]])
                     except ValueError:
                         # If there's no RA, Dec in the header, just use the target RA, Dec
-                        central_ra, central_dec = ra_obj, dec_obj
+                        central_ra, central_dec = ra_obj[0], dec_obj[0]
                     
                     if not updating_dict:
                         master_dict = get_dict(target, central_ra[0], central_dec[0], search_radius,
@@ -643,7 +643,7 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
                         coords = SkyCoord(RA + ' ' + DEC, unit=(u.hourangle, u.deg))
                     # Otherwise use the target coordinates
                     else:
-                        coords = SkyCoord(str(ra_obj) + ' ' + str(dec_obj), unit=(u.deg,u.deg))
+                        coords = SkyCoord(str(ra_obj[0]) + ' ' + str(dec_obj[0]), unit=(u.deg,u.deg))
                 # Save UTC, exposure, JD and BJD and LS times. Also airmass and filter used.
                 master_dict['UTC_times'] = np.append(master_dict['UTC_times'], str(utc_time).replace(' ', 'T'))
                 master_dict['exptimes'] = np.append(master_dict['exptimes'], h0[exptime_h_name])
