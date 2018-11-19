@@ -595,7 +595,7 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
                                                                     find_val(h0, 'DEC')]])
                     except ValueError:
                         # If there's no RA, Dec in the header, just use the target RA, Dec
-                        central_ra, central_dec = ra_obj[0], dec_obj[0]
+                        central_ra, central_dec = ra_obj, dec_obj
                     
                     if not updating_dict:
                         master_dict = get_dict(target, central_ra[0], central_dec[0], search_radius,
