@@ -26,6 +26,7 @@ from constants import log
 from get_photometry_eden import get_photometry
 import PhotUtils
 from transit_photometry import post_processing
+from eden_GPDetrend import eden_GPDetrend
 
 # Read config.ini
 config = ConfigParser()
@@ -43,6 +44,7 @@ parserIO.add_argument('--raw',action='store_true',help='look for data in the RAW
 parserIO.add_argument('--overwrite',action='store_true',help='overwrite existing photometry (photometry.pkl)')
 parserIO.add_argument('--photometry',action='store_true',help='ONLY do the photometry')
 parserIO.add_argument('--post-processing',action='store_true',help='ONLY do the post-processing (must do photometry first!)')
+parserIO.add_argument('--detrending',action='store_true',help='ONLY do the detrending with GPDetrend (must do photometry and post-processing first!)')
 args = parserIO.parse_args()
 tele,ndays = args.telescope,int(args.ndays)
 
@@ -93,6 +95,7 @@ date_dirs,dates = date_dirs[mask],dates[mask]
 targets = np.array([d.strip('/').split('/')[-2] for d in date_dirs])
 if target_names is not None:
     mask = np.in1d(targets,target_names)
+
     # Also check for names with underscores
     mask = mask|np.in1d(targets,[name.replace(' ','_') for name in target_names])
     date_dirs,dates,targets = date_dirs[mask],dates[mask],targets[mask]
@@ -107,6 +110,7 @@ bypass = False
 # Loop through the directories; save the data sets which fail with exceptions
 failed_phot = []
 failed_post = []
+failed_det = []
 for i in range(len(date_dirs)):
     print("\nTarget: {:s} | Date: {:s}".format(targets[i],dates[i].iso.split()[0]))
     log("Now working on {:s}".format(date_dirs[i]))
@@ -116,7 +120,7 @@ for i in range(len(date_dirs)):
     # Run the astrometry & photometry routine (unless --post-processing is passed as an argument)
     # This produces photometry.pkl (under the REDUCED directory tree), which contains the absolute
     # flux of every star across several aperture sizes, as well as the x/y positions and FWHM
-    if not args.post_processing:
+    if not args.post_processing and not args.detrending:
         print('\n\t###################################')
         print('\tDoing photometry....')
         print('\t###################################')
@@ -150,7 +154,7 @@ for i in range(len(date_dirs)):
 
     # Run the post-processing routine (unless --photometry is passed as an argument)
     # Chooses the optimal aperture size & set of reference stars then creates a light curve
-    if not args.photometry:
+    if not args.photometry and not args.detrending:
         print('\n\t###################################')
         print('\tDoing post-processing....')
         print('\t###################################')
@@ -190,6 +194,32 @@ for i in range(len(date_dirs)):
         print('\tSkipping post-processing....')
         print('\t###################################')
 
+    if not args.photometry or args.post-processing:
+        print('\n\t###################################')
+        print('\tDoing detrending....')
+        print('\t###################################')
+        # call eden_GPDetrend
+        if os.path.exists(reduced_dir+'/post_processing'):
+            # Try to run detrending, but skip this data set if it fails
+            try:
+                # Run the detrending routine
+                eden_GPDetrend(tele,reduced_dir,targets)
+            except (KeyboardInterrupt,SystemExit):
+                raise
+            except:
+                e = sys.exc_info()
+                print("\t Detrending FAILED with error type: {0}".format(e[0]))
+                print("\t See the log for more information.")
+                log("\t Detrending failed for {:s} with the following error:".format(date_dirs[i]))
+                log(traceback.print_exception(*e))
+                failed_det.append(i)
+    else:
+        print('\n\t###################################')
+        print('\tSkipping detrending....')
+        print('\t###################################')
+
+        
+
 # At the end, print which data sets failed
 if len(failed_phot)>0 or len(failed_post)>0:
     print("The following data sets FAILED to reduce:")
@@ -202,6 +232,10 @@ if len(failed_post)>0:
     string = ["({:s}/{:s}/{:s})".format(tele,targets[i],dates[i].iso.split()[0]) for i in failed_post]
     print("Post-processing:  {:s}".format('  '.join(string)))
     log("Post-processing:  {:s}".format('  '.join(string)))
+if len(failed_det)>0:
+    string = ["({:s}/{:s}/{:s})".format(tele,targets[i],dates[i].iso.split()[0]) for i in failed_det]
+    print("Detrending:  {:s}".format('  '.join(string)))
+    log("Detrending:  {:s}".format('  '.join(string)))
 
 
 
