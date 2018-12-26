@@ -10,7 +10,7 @@ import shutil
 import sys
 import traceback
 
-# Wrapper script for the photometry and post-processing scripts.
+# Wrapper script for the photometry, post-processing, and detrending scripts.
 
 # Clear the astroquery cache to ensure up-to-date values are grabbed from SIMBAD
 if os.path.exists(astropy_config.get_cache_dir()+'/astroquery/'):
@@ -28,6 +28,7 @@ import PhotUtils
 from transit_photometry import post_processing
 from eden_GPDetrend import eden_GPDetrend
 
+
 # Read config.ini
 config = ConfigParser()
 config.read('config.ini')
@@ -40,7 +41,8 @@ parserIO = argparse.ArgumentParser(description='Performs photometry and produces
 parserIO.add_argument('-telescope',default=None,help='name(s) of telescopes (e.g., VATT)')
 parserIO.add_argument('-ndays',default=7,help='number of days to look back')
 parserIO.add_argument('-target',default=None,help='specify the target')
-parserIO.add_argument('--raw',action='store_true',help='look for data in the RAW directory instead of CALIBRATED')
+parserIO.add_argument('--calibrated',action='store_true',help='look for data in the CALIBRATED directory instead of RAW')
+parserIO.add_argument('--no-calibration',action='store_true',help='do not perform calibration, just use raw images')
 parserIO.add_argument('--overwrite',action='store_true',help='overwrite existing photometry (photometry.pkl)')
 parserIO.add_argument('--photometry',action='store_true',help='ONLY do the photometry')
 parserIO.add_argument('--post-processing',action='store_true',help='ONLY do the post-processing (must do photometry first!)')
@@ -56,7 +58,13 @@ if tele not in telescopes_list:
     exit()
 
 # Are we using RAW or CALIBRATED data?
-dtype = '/RAW/' if args.raw else '/CALIBRATED/'
+dtype = '/CALIBRATED/' if args.calibrated else '/RAW/'
+if not args.no_calibration or args.calibrated:
+    pkl_name = 'calib_photometry.pkl'
+    post_name = 'calib_post_processing/'
+else:
+    pkl_name = 'photometry.pkl'
+    post_name = 'post_processing/'
 
 # Is the target specified?
 if args.target is not None:
@@ -116,8 +124,8 @@ for i in range(len(date_dirs)):
     log("Now working on {:s}".format(date_dirs[i]))
     reduced_dir = date_dirs[i].replace(dtype,'/REDUCED/')
     lightcurves_dir = date_dirs[i].replace(dtype,'/LIGHTCURVES/')
-    
-    # Run the astrometry & photometry routine (unless --post-processing is passed as an argument)
+
+    # Run the astrometry & photometry routine (unless --post-processing or --detrending is passed as an argument)
     # This produces photometry.pkl (under the REDUCED directory tree), which contains the absolute
     # flux of every star across several aperture sizes, as well as the x/y positions and FWHM
     if not args.post_processing and not args.detrending:
@@ -126,10 +134,10 @@ for i in range(len(date_dirs)):
         print('\t###################################')
         
         # Delete photometry.pkl if --overwrite is passed as an argument, but check first
-        if args.overwrite and os.path.exists(reduced_dir+'/photometry.pkl'):            
+        if args.overwrite and os.path.exists(reduced_dir+pkl_name):            
             if bypass or input("Overwriting photometry.pkl! Press return to confirm, or any other key to exit: ") == '':
-                os.remove(reduced_dir+'/photometry.pkl')
-                log("Removing {:s}".format(reduced_dir+'/photometry.pkl'))
+                os.remove(reduced_dir+pkl_name)
+                log("Removing {:s}".format(reduced_dir+pkl_name))
                 bypass = True
             else:
                 exit()
@@ -137,7 +145,7 @@ for i in range(len(date_dirs)):
         # Try to run photometry, but skip this data set if it fails
         try:
             # Run the photometry routine
-            get_photometry(tele,date_dirs[i])
+            get_photometry(tele,date_dirs[i], calibrate= not args.no_calibration, use_calibrated=args.calibrated)
         except (KeyboardInterrupt,SystemExit):
             raise
         except:
@@ -163,17 +171,18 @@ for i in range(len(date_dirs)):
         target_coords = [[RA,DEC]]
         
         # Run the post-processing routine (if photometry was successful)
-        if os.path.exists(reduced_dir+'/photometry.pkl'):
+        print(reduced_dir+pkl_name)
+        if os.path.exists(reduced_dir+pkl_name):
             # Try to do the post-processing, but except errors and continue
             try:
                 # Run the post-processing routine
-                post_processing(tele,reduced_dir,targets[i],target_coords,overwrite=True,ncomp=6)
+                post_processing(tele,reduced_dir,targets[i],target_coords,overwrite=True,ncomp=6, filename=pkl_name, outname=post_name)
                 
                 # Copy all of the .epdlc files into the LIGHTCURVES directory
                 print('\t Copying lightcurves into {:s}'.format(lightcurves_dir))
                 if not os.path.isdir(lightcurves_dir):
                     os.makedirs(lightcurves_dir)
-                for filename in glob.glob(reduced_dir+'/post_processing/LC/*.epdlc'):
+                for filename in glob.glob(reduced_dir+post_name+'/LC/*.epdlc'):
                     shutil.copyfile(filename,lightcurves_dir+'/'+filename.split('/')[-1])
             except (KeyboardInterrupt,SystemExit):
                 raise
@@ -194,16 +203,16 @@ for i in range(len(date_dirs)):
         print('\tSkipping post-processing....')
         print('\t###################################')
 
-    if not args.photometry or args.post-processing:
+    if not args.photometry and not args.post_processing:
         print('\n\t###################################')
         print('\tDoing detrending....')
         print('\t###################################')
         # call eden_GPDetrend
-        if os.path.exists(reduced_dir+'/post_processing'):
+        if os.path.exists(reduced_dir+post_name):
             # Try to run detrending, but skip this data set if it fails
             try:
                 # Run the detrending routine
-                eden_GPDetrend(tele,reduced_dir,targets)
+                eden_GPDetrend(tele,reduced_dir,targets, calibrated=not args.no_calibration)
             except (KeyboardInterrupt,SystemExit):
                 raise
             except:

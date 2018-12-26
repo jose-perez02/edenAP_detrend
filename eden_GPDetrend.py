@@ -5,13 +5,14 @@ import os
 from astropy import units as u
 from astroquery import simbad
 from astropy.time import Time
+from astropy.stats import sigma_clip
 from datetime import datetime
 import astropy.config as astropy_config
 from configparser import ConfigParser
 import pickle
 import time
 
-def eden_GPDetrend(telescope, datafolder, targets):
+def eden_GPDetrend(telescope, datafolder, targets, calibrated=True):
     # define constants from config.ini
     config = ConfigParser()
     config.read('config.ini')
@@ -20,7 +21,10 @@ def eden_GPDetrend(telescope, datafolder, targets):
     # create GPDetrend inputs, and run GPDetrend
     
     # create folder in post_processing for GPLC files
-    out_dir = datafolder + 'post_processing/' + 'GPLC/'
+    if calibrated:
+        out_dir = datafolder + 'calib_post_processing/' + 'GPLC/'
+    else:
+        out_dir = datafolder +'post_processing/'+'GPLC/'
     if not os.path.isdir(out_dir):
         os.mkdir(out_dir)
 
@@ -33,6 +37,10 @@ def eden_GPDetrend(telescope, datafolder, targets):
     # lc file
     times = nflux[:,0]
     flux = nflux[:,1]
+
+    # sigma clip flux
+    filt = sigma_clip(flux, sigma=5)
+    filt = np.invert(filt.mask)
         
     # eparams file
     etime = LC[:,1]
@@ -72,6 +80,11 @@ def eden_GPDetrend(telescope, datafolder, targets):
                 pass
             else:
                 pass
+            
+    # sigma mask
+    times, flux = times[filt], flux[filt]
+    airmass, FWHM, cen_X, cen_Y, bg = airmass[filt], FWHM[filt], cen_X[filt], cen_Y[filt], bg[filt]
+    cflux = cflux[filt, :]
                 
     # Write the GPDetrend input files
     # array format

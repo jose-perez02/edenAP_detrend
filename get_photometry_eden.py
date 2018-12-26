@@ -14,8 +14,9 @@ from tqdm import tqdm as bar
 import time
 from constants import get_telescopes, find_val, LOOKDATE, log
 import PhotUtils
+from eden_calibrate import eden_calibrate
 
-def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry=True,ref_centers=True):
+def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry=True,ref_centers=True, calibrate=True, use_calibrated=False):
     # define constants from config.ini
     config = ConfigParser()
     config.read('config.ini')
@@ -82,8 +83,12 @@ def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry
         os.makedirs(outdir)
     
     # Find photometry.pkl if it already exists (and isn't empty)
-    if os.path.exists(outdir+'/photometry.pkl'):
-        master_dict = pickle.load(open(outdir+'/photometry.pkl','rb'))
+    if use_calibrated or calibrate:
+        pkl_name = '/calib_photometry.pkl'
+    else:
+        pkl_name = '/photometry.pkl'
+    if os.path.exists(outdir+pkl_name):
+        master_dict = pickle.load(open(outdir+pkl_name,'rb'))
         if master_dict == {}:
             master_dict = None
         else:
@@ -93,8 +98,15 @@ def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry
             if 'frame_name' in master_dict.keys() and np.in1d(frame_name,master_dict['frame_name']).all():
                 print("\t Photometry complete! Skipping...")
                 return
+
     else:
         master_dict = None
+
+    # Look for calibrations and if they don't exist, create them
+    if calibrate and not use_calibrated:
+        eden_calibrate(telescope, datafolder, files)
+        datafolder = datafolder.replace('RAW', 'CALIBRATED')
+        files = glob.glob(datafolder+'/*') 
     
     # Aperture sizes
     R = np.arange(minap,maxap + 1,apstep)
@@ -110,7 +122,7 @@ def get_photometry(telescope,datafolder,minap=5,maxap=50,apstep=1,get_astrometry
 
         # Save dictionary:
         print('\t Saving photometry at ' + outdir + '...')
-        OUT_FILE = open(os.path.join(outdir, 'photometry.pkl'), 'wb')
+        OUT_FILE = open(outdir+pkl_name, 'wb')
         pickle.dump(master_dict, OUT_FILE)
         OUT_FILE.close()
     

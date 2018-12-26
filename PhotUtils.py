@@ -504,7 +504,7 @@ def getPhotometry(filenames, target: str, telescope: str, filters, R, ra_obj, de
     else:
         print('ERROR: the selected telescope %s is not supported.' % telescope)
         sys.exit()
-
+    
     # Iterate through the files:
     first_time = True
     # print('reach iteration through the files')
