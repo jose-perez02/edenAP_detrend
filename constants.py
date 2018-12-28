@@ -1,16 +1,26 @@
 import logging
 import os
 import re
+import warnings
 from configparser import ConfigParser
+from datetime import datetime
 from glob import iglob
-import numpy as np
 
-import jdcal
+import numpy as np
+from astropy.convolution import Gaussian2DKernel, interpolate_replace_nans, convolve_fft
 from astropy.io import fits
+from astropy.utils.exceptions import AstropyWarning
 from dateutil import parser
 
-from astropy.convolution import Gaussian2DKernel, interpolate_replace_nans, convolve_fft
-from string import Formatter
+from dirs_mgmt import dir_tree, validate_dirs
+
+# useful variables
+todays_date = datetime.today()
+_prog_dir = os.path.dirname(os.path.abspath(__file__))
+filterRegex = re.compile(r'.*\.fi?ts?')
+subRegex = re.compile(r'\.fi?ts?')
+dtpatt = re.compile(r'(\d{4}-\d{2}-\d{2})')
+
 
 # STANDARD LIST OF TELESCOPES, UPDATE WHEN NEEDED
 telescopes_list = ["VATT", "BOK", "KUIPER", "SCHULMAN", "CHAT", "CASSINI", "CAHA", "LOT", "GUFI"]
@@ -33,16 +43,13 @@ float_types = [float,np.float,np.float64,np.float_]
 int_types = [int,np.int,np.int64,np.int_]
 
 # Suppress astropy warnings
-import warnings
-from astropy.utils.exceptions import AstropyWarning
 warnings.simplefilter('ignore',category=AstropyWarning)
 
 # Formatting/functions for logging
 FORMAT1 = "%(message)s"
 edenAP_path = os.path.abspath(os.path.dirname(__file__))
 log_folder = os.path.join(edenAP_path, 'EDEN Logging')
-if not os.path.isdir(log_folder):
-    os.mkdir(log_folder)
+validate_dirs(log_folder)
 logging.basicConfig(filename=os.path.join(log_folder, 'edenAP.log'), format=FORMAT1, level=logging.INFO)
 log = logging.info
 
@@ -51,14 +58,6 @@ config = ConfigParser()
 config.read(edenAP_path+'/config.ini')
 server_destination = config['FOLDER OPTIONS']['server_destination']
 
-# EDEN Database shortcuts for mysql interactions
-EDEN_data_cols = "`Filename`,`Directory`,`DATE-OBS`,`MJD`,`Telescope`,`Observer`," \
-                 "`Target`,`Filter`,`Integration time [s]`,`Airmass`,`Instrument`," \
-                 "`RA`,`Dec`,`Data Quality`,`RA hh`,`RA mm`,`RA ss.ss`,`Dec dd`,`Dec mm`,`Dec ss.ss`"
-
-EDEN_data_vals = "'{}',\"{}\",'{}',{:1.3f},\"{}\",\"{}\",'{}',\"{}\",{:1.3f},{:1.3f},\"{}\","" \
-                    ""{:1.3f},{:1.3f},{:1.3f},{:t},{:t},{:1.3f},{:t},{:t},{:1.3f}"
-
 # Open filters.dat to determine the filter sets
 filter_sets = {}
 for line in open(edenAP_path+'/filters.dat','r').readlines():
@@ -66,7 +65,32 @@ for line in open(edenAP_path+'/filters.dat','r').readlines():
     keys = line.strip().split()
     filter_sets[keys[0]] = keys
 
+
 # Server localizers
+
+def get_calibrations(telescope, combined=False, both=False):
+    """
+    Get directory tree of given telescope's calibration files. e.g. /Server/Calibrations/Telescope
+    :param telescope: telescope for which to get combined directory tree
+    :param combined: If true, then retrieve COMBINED calibration directory tree instead of `Calibrations`
+    :param both: If true, then retrieve both directory trees; Calibrations and COMBINED in that order.
+    :return: python dictionary representing the directory tree
+    """
+    comb_dir = os.path.join(server_destination, 'COMBINED', telescope.upper())
+    cal_dir = os.path.join(server_destination, 'Calibrations', telescope.upper())
+
+    if both:
+        assert os.path.isdir(comb_dir), "COMBINED folder for %s telescope doesn't exist." % telescope
+        assert os.path.isdir(cal_dir), "Calibrations folder for %s telescope doesn't exist." % telescope
+        return dir_tree(cal_dir), dir_tree(comb_dir)
+    elif combined:
+        assert os.path.isdir(comb_dir), "COMBINED folder for %s telescope doesn't exist." % telescope
+        return dir_tree(comb_dir)
+    else:
+        assert os.path.isdir(cal_dir), "Calibrations folder for %s telescope doesn't exist." % telescope
+        return dir_tree(cal_dir)
+
+
 def get_telescopes():
     """
     Get the telescope names of the current ones in the server
@@ -75,23 +99,6 @@ def get_telescopes():
     telescope_dirs = iglob(os.path.join(server_destination, 'RAW/*'))
     telescopes = [telescope_dir.split('/')[-1] for telescope_dir in telescope_dirs]
     return telescopes
-
-
-def get_target_dates(calibrated=True, telescope=None):
-    """
-    get target dates for calibrated/raw targets in our server
-    :param calibrated: if True, only dates in the directory of calibrated objects returned, if False, only raw ones
-    :param telescope: telescope for which to find the targets; if None, then find for all telescopes
-    :return: list of dates
-    """
-    add2server = ['*', 'cal', '*', '*', '*']
-    if telescope is not None:
-        add2server[0] = telescope.upper()
-    if not calibrated:
-        add2server[1] = 'raw'
-    date_dirs = iglob(os.path.join(server_destination, *add2server))
-    dates = {date_dir.split('/')[-1] for date_dir in date_dirs}
-    return sorted(list(dates))
 
 
 # Convenience functions
@@ -113,100 +120,111 @@ def shorten_path(path):
     # half_path = os.path.join(path_list[0], *path_list[1:])
     return short_path
 
-def find_val(filepath_header, keyword, ext=0, comment=False, regex=False, typ=None):
+
+def find_dimensions(file_hdul, keyword=None):
     """
-    This function takes a keyword and finds the FIRST matching key in the header and returns the its value.
+    This function will find the dimensions of an image given its address.
+    The default keywords for the dimensions are: NAXIS1 and NAXIS2.
+    You may enter an optional argument keywords to use use instead of NAXIS.
+    If this is a MEF, then we assume all extensions share the same dimensions!
+    We therefore only need to check dimensions of ONE extension!
+
+    :param file_hdul: filepath for the file, filepath can also be a HDUList
+    :param keyword: keyword for the key header to use instead of NAXIS.
+    """
+    hdul = ModHDUList(file_hdul)
+    nexts = hdul.len()
+
+    keyword = 'NAXIS' if keyword is None else keyword
+    xdim, ydim = keyword + '1', keyword + '2'
+
+    if nexts > 1:
+        # find dimensions of first one, then make sure its equal for all extensions, then return
+        ndims = find_val(hdul[1].header, xdim), find_val(hdul[1].header, ydim)
+        all_ndims = [(find_val(hdul, xdim, ext=i), find_val(hdul, ydim, ext=i)) for i in range(2, nexts)]
+        if len(all_ndims) > 1:
+            assert all([ndim == ndims for ndim in all_ndims]), 'Image has different dimensions along extensions'
+    else:
+        ndims = find_val(hdul[0].header, xdim), find_val(hdul[0].header, ydim)
+    return ndims
+
+
+def find_val(filepath_header, keyword, ext=0, comment=False, regex=False,
+             is_str=False, raise_err=True):
+    """
+    This function takes a keyword and finds the FIRST matching key in the
+    header and returns the its value.
+
     :param filepath_header: filepath for the file, filepath can also be a header
     :param keyword: keyword for the key header
     :param ext: extension to look for header. Default 0
     :param comment: Look for match in keyword comments. Default False
-    :param regex: Look for match using regular expression; re.search function.
-    :param typ:Type of object that you want returned. If keyword match, and value type is wrong, its comment is returned
+    :param regex: Look for match using regular expression; re.search(keyword, key)
+    :param is_str: If value found isn't a string, its comment is returned.
+    :param raise_err: If True, raise error when key header isn't found; else return None
     :return: value corresponding the key header. String or Float. Returns None if no match
     """
-    if isinstance(filepath_header, fits.Header):
-        hdr = filepath_header
-    else:
-        with fits.open(filepath_header) as hdul:
-            hdr = hdul[ext].header
+    hrd = get_header(filepath_header, ext=ext)
     return_val = None
-
-    # Before attempting brute search. Try getting the value
+    # Before attempting brute search. Try getting the value directly
     try:
         if not regex:
-            return_val = hdr[keyword]
+            return_val = hrd[keyword]
         else:
             raise KeyError
     except KeyError:
-        for key, val in hdr.items():
+        # Initiate intense search in headers.
+        for key, val in hrd.items():
             if regex:
+                # do regex search on key and comment
                 if re.search(keyword, key):
                     return_val = val
-                elif re.search(keyword, hdr.comments[key]):
+                elif comment and re.search(keyword, hrd.comments[key]):
                     return_val = val
             else:
-                inKeyword = keyword.upper() in key.upper()
-                inComment = keyword.upper() in hdr.comments[key].upper()
-                if inKeyword:
+                inkeyword = keyword.upper() in key.upper()
+                incomment = keyword.upper() in hrd.comments[key].upper()
+                if inkeyword:
                     return_val = val
-                if comment and inComment:
+                if comment and incomment:
                     return_val = val
             if return_val is not None:
-                if (typ is not None) and (typ is not type(return_val)):
-                    comment = hdr.comments[key].strip('/').strip()
-                    return_val = comment
+                if is_str and not isinstance(return_val, str):
+                    return_val = hrd.comments[key].strip('/ =')
                 break
         else:
-            raise
+            if raise_err:
+                raise
+            else:
+                return_val = None
     return return_val
 
 
-def getjd(date):
+def remove_chars(string, chars):
     """
-    get Julian Date given Gregorian Date as string or datetime object
-    :param date: date string or datetime object
-    :return: julian date
+    Function to remove all characters in a string.
+    :params string: string to replace chars in
+    :params chars: characters to remove in string
+    :return: filtered string.
     """
-    if isinstance(date, str):
-        date = parser.parse(date)
-    return sum(jdcal.gcal2jd(int(date.year), int(date.month), int(date.day)))
+    return ''.join([c for c in string if c not in chars])
 
 
-# function to find correct date in header
-def LOOKDATE(header):
+def find_dates(string) -> list:
     """
-    Persistent function that will look for the date of the observation recorded in the header.
-
-    Procedure:
-    1. Looks for 'DATE', 'DATE-OBS' or anything including 'DATE' in header.
-    2. Tests format 'YYYY-MM-DDTHH:MM:SS.ss', or simply 'YYYY-MM-DD' or 'YYYY/MM/DD'
-    3. If format doesn't include the time, it looks for 'UT' keyword to find time and appends it to the date string
-
-    :param header: header of current file
-    :return: datetime object
+    useful simple function to find all matches to date format: YYYY-MM-DD
+    :param string: string where to look for date match
+    :return: all found dates
     """
-    try:
-        # find_val will first try to get 'DATE' header. If it doesn't work, it will find header keywords that
-        # include the word 'DATE' which includes 'DATE-OBS'
-        date_key = 'DATE-OBS' if 'DATE-OBS' in header else 'DATE'
-        date = find_val(header, date_key)
-        if "T" in date:
-            temp_date = parser.parse(date)
-        else:
-            try:
-                time = find_val(header, 'UT')
-                if '/' in time or '-' in time or ':' not in time:
-                    # if 'UT' value suggests date string, then raise err
-                    raise KeyError
-                temp_date = parser.parse(date + 'T' + time)
-            except KeyError:
-                time_key = 'TIME-OBS' if 'TIME-OBS' in header else 'TIME'
-                time = find_val(header, time_key)
-                temp_date = parser.parse(date + 'T' + time)
-    except (KeyError, TypeError):
-        date = find_val(header, 'DATE')
-        temp_date = parser.parse(date)
-    return temp_date
+    return dtpatt.findall(string)
+
+
+def filter_fits(list_files: list) -> list:
+    """
+    Function to filter FITS files from given list of files.
+    """
+    fits_files = filter(filterRegex.search, list_files)
+    return list(fits_files)
 
 
 # function to validate directory paths. It creates a path if it doesn't already exist.
@@ -233,6 +251,7 @@ def natural_keys(text):
     '''
     return [atoi(c) for c in re.split('(\d+)', text)]
 
+
 # Identifies filters by their preferred name using the filters.dat file
 # If the filter is not identified in filters.dat, just return the input
 def id_filters(filters):
@@ -247,59 +266,129 @@ def id_filters(filters):
     else:
         return out
 
-def copy(source, dest):
-    """
-    wrapper function that uses unix system's copy function: `cp -n`
-    :param source: source file
-    :param dest: destination file/folder
-    :return:
-    """
-    dest = new_destination(source, dest)
-    proc = subprocess.Popen(['cp', '-n', source, dest], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return_code = proc.wait()
-    if return_code == 1:
-        log("Copy Function encountered Error. File somehow exists already.")
-    return return_code
 
-def mv(source, dest):
+def is_date(key, hdr):
     """
-    wrapper function that uses unix system's move function: `mv -n`
-    :param source: source file
-    :param dest: destination file/folder
-    :return:
+    This function by itself is useless. It will check the given keyword
+    to see if its value corresponds to a time/date stamp.
     """
-    dest = new_destination(source, dest)
-    proc = subprocess.Popen(['mv', '-n', source, dest], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return_code = proc.wait()
-    if return_code == 1:
-        log("Move Function encountered Error. File somehow exists already.")
-    return return_code
+    val = hdr[key]
+    is_str = isinstance(val, str)
+    # Make sure value is a string and not a digit
+    if not is_str or is_str and remove_chars(val, '. ').isdigit():
+        return False
 
-def check_and_rename(file, add=0):
+    # keys to reject as date/time
+    not_time = [rej in key.lower() for rej in ['ra', 'dec', 'ha', 'lst', 'st', 'loctime', 'local']]
+
+    # values to accept as date/time
+    yes_time = [acc in val for acc in ['/', ':', '-']]
+
+    # check if any value in not_time is True and check that at least one in yes_time is True
+    if any(not_time) or not any(yes_time):
+        return False
+
+    try:
+        # get potential date,
+        date = parser.parse(val)
+
+        # test if date is not actually possible; from last 10 years; SAFE-PLAY
+        diff = todays_date - date
+        return diff.days < 3650
+    except (ValueError, TypeError):
+        return False
+
+
+def find_date(hdr):
     """
-    Quick function to
-    :param file:
-    :param add:
-    :return:
+    Most general function to find date/time in header
+    Implement is_date function to find all values in header that are time
+    stamps. The code will return the earliest one. Which should correspond to
+    the start exposure time.
+    :params hdr: fits header
+    :return: datetime object of start of exp time
     """
-    original_file = file
-    if add != 0:
-        split = file.split(".")
-        ext = split[-1]
-        before_ext = '.'.join(split[:-1])
-        part_1 = before_ext + "_" + str(add)
-        file = ".".join([part_1, ext])
-    if not os.path.isfile(file):
-        return file
+    # filter keywords in header to get all possible  dates
+    dates = filter(lambda k: is_date(k, hdr), hdr.keys())
+
+    # get unique date_time objects from filtered dates
+    dates_obj = {parser.parse(hdr[date]) for date in dates}
+
+    # get only times; those keys that only had time will have today's date.
+    times = {obj for obj in dates_obj if obj.date() == todays_date.date()}
+    # now separate dates and times, sort in descending order
+    dates = sorted(dates_obj - times)
+    times = sorted(times)
+
+    # check if date-time exists, if it does return!
+    for date in dates:
+        # only date&time objects will have nonzero .hour/.minute
+        if date.hour != 0:
+            return date
+    # since there is no date-time, create date-time with date/time objs
+    return datetime(dates[0].year, dates[0].month, dates[0].day, times[0].hour,
+                    times[0].minute, times[0].second, times[0].microsecond)
+
+
+def get_date(hdr, ext=0):
+    """
+    Simple function to retrieve the date/time at which the exposure of the current header's image started.
+    This function starts by trying to put together values from header into a date/time object.
+    If simple procedure doesn't work, then proceed to brute force search.
+    :params hdr: header object, filepath to fits file, or HDUList object; Default extension=0.
+    :
+    """
+    hdr = get_header(hdr, ext=ext)
+    try:
+        if "T" in hdr['DATE-OBS']:
+            date = parser.parse(hdr['DATE-OBS'])
+        elif 'TIME-OBS' in hdr.keys() and '-' not in hdr['TIME-OBS']:
+            date = parser.parse(hdr['DATE-OBS'] + 'T' + hdr['TIME-OBS'])
+        elif 'UT' in hdr.keys() and '-' not in hdr['UT']:
+            date = parser.parse(hdr['DATE-OBS'] + 'T' + hdr['UT'])
+        else:
+            raise KeyError
+    except (KeyError, TypeError, ValueError):
+        date = find_date(hdr)
+    return date
+
+
+def check_arraylist(array_list):
+    """
+    Helper function for the ModHDUList class. This function will check if the argument is a list of arrays
+    :param array_list: any input will be check to match the above
+    :return: True only if array_list is a list of numpy arrays
+    """
+    if isinstance(array_list, list):
+        for i in range(len(array_list)):
+            if not isinstance(array_list[i], (np.ndarray, type(None))):
+                return False
     else:
-        add += 1
-        check_and_rename(original_file, add)
+        return False
+    return True
+
+
+def get_header(filename_hdu, ext=0):
+    """
+    Get header from filepath of FITS file or HDUList object.
+    :param filename_hdu: filepath to file (string) or HDUList object
+    :param ext: extension; default [0]
+    :return: return the header
+    """
+    if isinstance(filename_hdu, fits.Header):
+        return filename_hdu
+    elif isinstance(filename_hdu, list):
+        return filename_hdu[ext].header
+    else:
+        # assume is string giving location of HDUList
+        return fits.getheader(filename_hdu, ext=ext)
+
 
 class ModHDUList(fits.HDUList):
     # class attribute is the kernel
-    kernel = Gaussian2DKernel(5)
+    _kernel = Gaussian2DKernel(5)
 
-    def __init__(self, hdus=[], interpolate=False, **kwargs):
+    def __init__(self, hdus=[], file=None, interpolate=False, **kwargs):
         """
         This is wrapper around fits.HDUList class
         This class will take all methods and properties of fits.HDUList
@@ -313,9 +402,10 @@ class ModHDUList(fits.HDUList):
         :param hdus: filepath to fits file or a fits.HDUList object
         :param interpolate: if True, instance will interpolate negative/zero values in data at construction
         """
-        if type(hdus) is str:
-            hdus = fits.open(hdus)
-        # validate dimensions of data
+        if isinstance(hdus, str):
+            hdus = fits.open(hdus, **kwargs)
+
+        # validate dimensions of data; only needed a few times
         for i in range(len(hdus)):
             data: np.ndarray = hdus[i].data
             if data is None:
@@ -324,8 +414,8 @@ class ModHDUList(fits.HDUList):
             if len(data.shape) > 2 and data.shape[0] == 1:
                 # then reshape to 2 dimensions
                 shaped_data = data.reshape((data.shape[1:]))
-                hdus[i].data = shaped_data.astype(float)
-        super(ModHDUList, self).__init__(hdus, **kwargs)
+                hdus[i].data = shaped_data.astype(np.float32)
+        super(ModHDUList, self).__init__(hdus, file=file)
         if interpolate:
             self.interpolate()
 
@@ -333,20 +423,18 @@ class ModHDUList(fits.HDUList):
         """
         interpolate zeros and negative values in data using FFT convolve function
         """
-        for hdu in self:
-            if hdu.data is None:
+        for i in range(self.len()):
+            if self[i].data is None:
                 continue
             with np.errstate(invalid='ignore'):
-                non_finite = ~np.isfinite(hdu.data)
-                less_zero = hdu.data <= 0
+                non_finite = ~np.isfinite(self[i].data)
+                less_zero = self[i].data <= 0
                 if np.any(less_zero) or np.any(non_finite):
-                    data = hdu.data.astype(float)
-                    mask_data = np.ma.masked_less_equal(data, 0)
-                    # mask_data = np.ma.masked_inside(data, -1e5, 0)
-                    mask_data.fill_value = np.nan
-                    data = mask_data.filled()
-                    data = interpolate_replace_nans(data, self.kernel, convolve=convolve_fft, allow_huge=True)
-                    hdu.data = data
+                    data = self[i].data.astype(np.float32)
+                    data[less_zero] = np.nan
+                    data[non_finite] = np.nan
+                    data = interpolate_replace_nans(data, self._kernel, convolve=convolve_fft, allow_huge=True)
+                    self[i].data = data
 
     def len(self):
         """
@@ -383,8 +471,8 @@ class ModHDUList(fits.HDUList):
         """
         Check data before operations are applied to it. We allow None's to be in this list because the None is usually
         used instead for an empty data attribute.
-        :param hdul:
-        :return:
+        :param hdul: HDUList or list of arrays representing image date
+        :return: (hdul_flag, arrays_flat) flags to decide calculation method
         """
         # use flags to tell whether given input is a HDUList or a list of numpy arrays
         hdul_flag = "HDUList" in str(type(hdul))
@@ -401,14 +489,14 @@ class ModHDUList(fits.HDUList):
                 continue
             if hdul_flag:
                 # assuming hdul is another hdul
-                hdu_data = hdul[i].data.astype(float)
-                data = self[i].data.astype(float) - hdu_data
+                hdu_data = hdul[i].data.astype(np.float32)
+                data = self[i].data.astype(np.float32) - hdu_data
             elif arrays_flag:
                 # assuming hdul is a list of ndarrays
-                data = self[i].data.astype(float) - hdul[i].astype(float)
+                data = self[i].data.astype(np.float32) - hdul[i].astype(np.float32)
             else:
                 # assuming hdul is a constant
-                data = self[i].data.astype(float) - hdul
+                data = self[i].data.astype(np.float32) - hdul
             new_obj[i].data = data
         return new_obj
 
@@ -420,14 +508,14 @@ class ModHDUList(fits.HDUList):
                 continue
             if hdul_flag:
                 # assuming hdul is another hdul
-                hdu_data = hdul[i].data.astype(float)
-                data = self[i].data.astype(float) / hdu_data
+                hdu_data = hdul[i].data.astype(np.float32)
+                data = self[i].data.astype(np.float32) / hdu_data
             elif arrays_flag:
                 # assuming hdul is a list of ndarrays
-                data = self[i].data.astype(float) / hdul[i].astype(float)
+                data = self[i].data.astype(np.float32) / hdul[i].astype(np.float32)
             else:
                 # assuming hdul is a constant
-                data = self[i].data.astype(float) / hdul
+                data = self[i].data.astype(np.float32) / hdul
             new_obj[i].data = data
         return new_obj
 
@@ -439,14 +527,14 @@ class ModHDUList(fits.HDUList):
                 continue
             if hdul_flag:
                 # assuming hdul is another hdul
-                hdu_data = hdul[i].data.astype(float)
-                data = self[i].data.astype(float) + hdu_data
+                hdu_data = hdul[i].data.astype(np.float32)
+                data = self[i].data.astype(np.float32) + hdu_data
             elif arrays_flag:
                 # assuming hdul is a list of ndarrays
-                data = self[i].data.astype(float) + hdul[i].astype(float)
+                data = self[i].data.astype(np.float32) + hdul[i].astype(np.float32)
             else:
                 # assuming hdul is a constant
-                data = self[i].data.astype(float) + hdul
+                data = self[i].data.astype(np.float32) + hdul
             new_obj[i].data = data
         return new_obj
 
@@ -458,14 +546,14 @@ class ModHDUList(fits.HDUList):
                 continue
             if hdul_flag:
                 # assuming hdul is another hdul
-                hdu_data = hdul[i].data.astype(float)
-                data = self[i].data.astype(float) * hdu_data
+                hdu_data = hdul[i].data.astype(np.float32)
+                data = self[i].data.astype(np.float32) * hdu_data
             elif arrays_flag:
                 # assuming hdul is a list of ndarrays
-                data = self[i].data.astype(float) * hdul[i].astype(float)
+                data = self[i].data.astype(np.float32) * hdul[i].astype(np.float32)
             else:
                 # assuming hdul is a constant
-                data = self[i].data.astype(float) * hdul
+                data = self[i].data.astype(np.float32) * hdul
             new_obj[i].data = data
         return new_obj
 
@@ -487,7 +575,7 @@ class ModHDUList(fits.HDUList):
         :return: normalized HDUList extension-wise.
         """
         if method != 'median' and method != 'mean':
-            raise ValueError('Method {} doesn\'t exist please enter "median" or "mean"'.format(method))
+            raise ValueError('Method "{}" doesn\'t exist please enter "median" or "mean"'.format(method))
         method = getattr(np, method)
         flatten_hdul = ModHDUList([hdu.copy() for hdu in self])
         for i in range(self.len()):
@@ -498,35 +586,26 @@ class ModHDUList(fits.HDUList):
         flatten_hdul[0].header.add_history('FITS has been flattened by its {}'.format(method))
         return flatten_hdul
 
-    def median(self):
+    def median(self, extension_wise=False):
         """
         Get median of all pixels in all extensions
         """
-        return np.nanmedian([hdu.data.astype(float) for hdu in self if hdu.data is not None])
+        if extension_wise:
+            return np.array([np.nanmedian(hdu.data) for hdu in self if hdu.data is not None])
+        return np.nanmedian([hdu.data for hdu in self if hdu.data is not None])
 
-    def mean(self):
+    def mean(self, extension_wise=False):
         """
         Get mean of all pixels in all extensions
         """
-        return np.nanmean([hdu.data.astype(float) for hdu in self if hdu.data is not None])
+        if extension_wise:
+            return np.array([np.nanmean(hdu.data) for hdu in self if hdu.data is not None])
+        return np.nanmean([hdu.data for hdu in self if hdu.data is not None])
 
-    def std(self):
+    def std(self, extension_wise=False):
         """
         Get standard deviation of all pixels in all extensions
         """
-        return np.nanstd([hdu.data.astype(float) for hdu in self if hdu.data is not None])# STANDARD LIST OF TELESCOPES AND TYPES OF CALIBRATIONS IMAGES, UPDATE WHEN NEEDED
-
-# Simple class to avoid invalid integer to float implicit conversion when formatting a string
-# Use... MyFormatter().format("{0} {1:t}", "Hello", 4.567)  # returns "Hello 4"
-class MyFormatter(Formatter):
-    """
-    Simple class to avoid invalid integer to float implicit conversion when formatting a string.
-    Usage:
-    MyFormatter().format("{0} {1:t}", "Hello", 4.567)  # returns "Hello 4"
-    """
-    def format_field(self, value, format_spec):
-        if format_spec == 't':  # Truncate and render as int
-            return str(int(value))
-        return super(MyFormatter, self).format_field(value, format_spec)
-
-
+        if extension_wise:
+            return np.array([np.nanstd(hdu.data) for hdu in self if hdu.data is not None])
+        return np.nanstd([hdu.data for hdu in self if hdu.data is not None])
