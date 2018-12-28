@@ -1,14 +1,10 @@
-import resource
-import os
+import fnmatch
 import random
-import re
-from datetime import datetime
+import time
+from functools import partial
 from gc import collect
 from multiprocessing import Pool
-import time
-import objgraph
-import psutil
-
+from os.path import join, isdir, isfile, dirname, basename
 
 import numpy as np
 from astropy import units as u
@@ -16,63 +12,23 @@ from astropy.io import fits
 from astropy.modeling import models
 from astropy.nddata import CCDData
 from ccdproc import trim_image, subtract_overscan, cosmicray_lacosmic
+from dateutil.parser import parse
 
-from DirSearch_Functions import search_all_fits, set_mulifits
-from constants1 import log, ModHDUList, check_and_rename
+from DirSearch_Functions import search_all_fits
+from constants import log, ModHDUList, natural_keys, todays_date, get_date, find_dates, find_val, get_calibrations
+from constants import server_destination, find_dimensions, filter_fits
+from dirs_mgmt import validate_dirs
 
-todays_day = lambda: datetime.today()
-
-global num_flats, num_bias, num_darks
-
-
-def atoi(text):
-    return int(text) if text.isdigit() else text
+todays_day = lambda: todays_date.date
 
 
-def natural_keys(text):
-    '''
-    alist.sort(key=natural_keys) sorts in human order
-    http://nedbatchelder.com/blog/200712/human_sorting.html
-    (See Toothy's implementation in the comments)
-    '''
-    return [atoi(c) for c in re.split('(\d+)', text)]
-
-
-def create_generator(iterator):
-    for obj in iterator:
-        yield obj
-
-
-def memory():
-    # return the memory usage in MB
-    import psutil
-    process = psutil.Process(os.getpid())
-    mem = process.memory_info().rss / float(2 ** 20)
-    return mem
-
-
-def chunks(l, n):
-    """Yield successive n-sized chunks from l."""
-    chunks_list = []
-    for i in range(0, len(l), n):
-        chunks_list.append(l[i:i + n])
-    return chunks_list
-
-
-def replace_or_inf(hdul, constant, zero=False, infi=False):
-    for hdu in hdul:
-        if hdu.data is None:
-            continue
-        zero_indx = hdu.data == 0
-        inf_indx = hdu.data == np.inf
-        if zero:
-            hdu.data[zero_indx] = constant
-        if infi:
-            hdu.data[inf_indx] = constant
-
-
-def get_gain_rdnoise(calibration, bins=2, filters=None, twi_flat=False):
-    basename = os.path.basename
+def get_gain_rdnoise(calibration, bins=2, filters=None, twi_flat=False, limit=75, debug=False):
+    """
+    Get gain and read noise using files in calibration folder. Using selected
+    bin # data, and filters.
+    """
+    if debug:
+        log('executed get_gain_rdnoise!')
     bias = []
     append_bias = bias.append
     flats = []
@@ -80,12 +36,11 @@ def get_gain_rdnoise(calibration, bins=2, filters=None, twi_flat=False):
     medbias_path = None
     if not filters:
         return None
-    # edit for calibrations in different folders
-    all_calibs = []
-    for i in range(len(calibration)):
-        for j in search_all_fits(calibration[i]):
-            all_calibs.append(j)
-    for filepath in all_calibs:
+    if debug:
+        log('finding calibrations files for bin={}, filter={}'.format(bins,
+                                                                      filters))
+
+    for filepath in search_all_fits(calibration):
         filename = basename(filepath)
         this_imagetype = find_imgtype(filepath)
         if not check_comp(filepath, bins):
@@ -99,73 +54,111 @@ def get_gain_rdnoise(calibration, bins=2, filters=None, twi_flat=False):
             append_bias(filepath)
             continue
         elif "FLAT" == this_imagetype:
-            if check_comp(filepath, filters, twilight_flats=twi_flat):
+            if check_comp(filepath, filters, twi_flat):
                 append_flats(filepath)
             continue
+
     # limit search
     assert bias and flats, "Either bias or flats files were not detected."
-    if len(flats) > 100:
-        flats = random.sample(flats, 100)
-    if len(bias) > 100:
-        bias = random.sample(bias, 100)
-        # files with lowest sigma
-    least_sigma = 1e6
-    bias1 = bias2 = None
-    log('looking for bias files with lowest sigma')
-    for bias_file in bias:
-        bias_ = ModHDUList(bias_file)
-        bias_ = overscan_sub(bias_)
-        sigma = bias_.std()
-        if sigma < least_sigma:
-            log("{:1.2f}\t{:s}".format(sigma, bias_file))
-            # log(str(sigma) + bias_file)
-            bias2 = bias1
-            bias1 = bias_
-            least_sigma = sigma
-    log('looking for flats file with lowest sigma')
-    flat1 = flat2 = None
-    least_sigma = 1e6
-    # we need to account for bias noise
+
+    if debug:
+        log('Found bias and flats!\n\tFlats: {}\n\tBias:{}'.format(len(flats), len(bias)))
+
+    # limit the amount of data
+    # if more than ~limit bias, use latest limit
+    if debug:
+        log('limiting data!')
+    if len(bias) > limit:
+        # draw random sample of files, if too many
+        if len(bias) > 3 * limit:
+            bias = random.sample(bias, 3 * limit)
+        # get dates of all bias
+        # tuples (date, bias)
+        tlist = {(get_date(b), b) for b in bias}
+        # sort by date (ascending order)
+        tlist = sorted(tlist, key=lambda x: x[0], reverse=True)
+        # now get latest limit files
+        bias = [*zip(*tlist[-limit:])][1]
+
+    if len(flats) > limit:
+        # draw random sample of files, if too many
+        if len(flats) > 3 * limit:
+            flats = random.sample(flats, 3 * limit)
+        # get dates of all flats
+        # tuples (date, flat)
+        tlist = {(get_date(flat), flat) for flat in flats}
+        # sort by date (ascending order)
+        tlist = sorted(tlist, key=lambda x: x[0], reverse=True)
+        # now get latest 'limit' files
+        flats = [*zip(*tlist[-limit:])][1]
+
+    # now we must filter out data that is trimmed
+    idx = 1 if ModHDUList(bias[0])[0].data is None else 0
+
+    # apply to bias frames
+    shapes = sorted([ModHDUList(image)[idx].data.shape for image in bias])
+    equal_shapes = [shapes[0] == ishape for ishape in shapes]
+    diff_shapes = not all(equal_shapes)
+    if diff_shapes:
+        if debug:
+            log('bias frames contain images with diff dimensions!. Correcting...')
+        the_shape = sorted(shapes)[-1]
+        bias = [image for image in bias if ModHDUList(image)[idx].data.shape == the_shape]
+
+    # apply to flats frames
+    shapes = sorted([ModHDUList(image)[idx].data.shape for image in flats])
+    equal_shapes = [shapes[0] == ishape for ishape in shapes]
+    diff_shapes = not all(equal_shapes)
+    if diff_shapes:
+        log('flats frames contain images with diff dimensions!. Correcting...')
+        the_shape = sorted(shapes)[-1]
+        flats = [image for image in flats if ModHDUList(image)[idx].data.shape == the_shape]
+
+    if debug:
+        log('sorting bias images')
+    # sort bias by sigma (ascending order)
+    bias = sorted(bias, key=lambda x: overscan_sub(x).std())
+
+    # we need to account for bias noise in flats
     if not medbias_path:
-        medbias_path = cross_median(bias, this_type='Bias')
+        medbias_path = imcombine(bias, this_type='Bias')
     medbias = ModHDUList(medbias_path)
-    for flat_file in flats:
-        flat = ModHDUList(flat_file) - medbias
-        flat = overscan_sub(flat)
-        sigma = flat.std()
-        if sigma < least_sigma:
-            log("{:1.2f}\t{:s}".format(sigma, flat_file))
-            flat2 = flat1
-            flat1 = flat
-            least_sigma = sigma
-    collect()
-    # MAKE SURE THERE ARE TWO FILES:
-    if flat1 is None or flat2 is None:
-        flat1 = random.sample(flats, 1)[0]
-        diff = set(flats) - {flat1}
-        flat2 = random.sample(list(diff), 1)[0]
-        flat1 = ModHDUList(flat1)
-        flat2 = ModHDUList(flat2)
-    if bias1 is None or bias2 is None:
-        bias1 = random.sample(bias, 1)[0]
-        diff = set(bias) - {bias1}
-        bias2 = random.sample(list(diff), 1)[0]
-        bias1 = ModHDUList(bias1)
-        bias2 = ModHDUList(bias2)
+
+    # helper lambda function to get bias-subtracted flats
+    def bias_sub(flat):
+        return ModHDUList(flat) - medbias
+
+    if debug:
+        log('sorting flats images')
+    # sort flats by sigma (ascending order)
+    flats = sorted(flats, key=lambda x: overscan_sub(bias_sub(x)).std())
+
+    if debug:
+        log('Top Bias Images: {}'.format(bias[:2]))
+        log('Top Bias Images\' dates: {}, {}'.format(get_date(bias[0]), get_date(bias[1])))
+        log('Top Bias STD: {:.3f}, {:.3f}'.format(overscan_sub(bias[0]).std(), overscan_sub(bias[1]).std()))
+        log('Top Flats Images: {}'.format(flats[:2]))
+        log('Top Flats Images\' dates: {}, {}'.format(get_date(flats[0]), get_date(flats[1])))
+        log('Top Flats STD: {:.3f}, {:.3f}'.format(overscan_sub(flats[0]).std(), overscan_sub(flats[1]).std()))
+
+    # get two images with lowest sigmas
+    bias1, bias2 = ModHDUList(bias[0]), ModHDUList(bias[1])
+    flat1, flat2 = ModHDUList(flats[0]), ModHDUList(flats[1])
+
+    log('Applying final calculations!')
     # We must collect up all readnoise/gain per amplifier, store them in 'gains' and 'read_noises' in order
     # read_noises are read noises in units of ADU
-    bias_diff = bias1 - bias2
-    read_noise_calc = lambda i: bias_diff[i].data.std() / np.sqrt(2)
-    read_noises = np.array([read_noise_calc(i) for i in range(len(bias1)) if bias1[i].data is not None])
+    bias_diff: ModHDUList = bias1 - bias2
+    read_noises = bias_diff.std(extension_wise=True) / np.sqrt(2)
     log("READ_NOISES:\t{} ADU".format(read_noises))
     # Now we get the gain using the flats
     normflat = flat2.flatten()
-    flatcorr = flat1 / normflat
-    if len(read_noises) == len(flat1) - 1:
-        gain_calc = lambda i: flatcorr[i].data.mean() / (0.5 * flatcorr[i].data.std() ** 2 - read_noises[i - 1] ** 2)
-    else:
-        gain_calc = lambda i: flatcorr[i].data.mean() / (0.5 * flatcorr[i].data.std() ** 2 - read_noises[i] ** 2)
-    gains = np.array([gain_calc(i) for i in range(len(flat1)) if flat1[i].data is not None])
+    normflat.interpolate()
+    flatcorr: ModHDUList = flat1 / normflat
+    flatcorr_means = flatcorr.mean(extension_wise=True)
+    flatcorr_stds = flatcorr.std(extension_wise=True)
+    # normalize the mean by photon noise and read noise
+    gains = flatcorr_means / (0.5 * flatcorr_stds ** 2 - read_noises ** 2)
     read_noises_e = gains * read_noises
     return gains, read_noises_e
 
@@ -187,7 +180,7 @@ def find_imgtype(filepath_header, filename=None, ext=0, median_opt=False):
     option2 = find_val(filepath_header, "imagety", ext, raise_err=False).upper()
     # Check filename
     if isinstance(filepath_header, str):
-        option3 = filename = os.path.basename(filepath_header).upper()
+        option3 = filename = basename(filepath_header).upper()
     else:
         if filename is None:
             option3 = filename = ''
@@ -205,53 +198,6 @@ def find_imgtype(filepath_header, filename=None, ext=0, median_opt=False):
             return key
     else:
         return None
-
-
-def find_val(filepath_header, keyword, ext=0, comment=False, regex=False, typ=None, raise_err=True):
-    """
-    This function takes a keyword and finds the FIRST matching key in the header and returns the its value.
-    :param filepath_header: filepath for the file, filepath can also be a header
-    :param keyword: keyword for the key header
-    :param ext: extension to look for header. Default 0
-    :param comment: Look for match in keyword comments. Default False
-    :param regex: Look for match using regular expression; re.search function.
-    :param typ:Type of object that you want returned. If keyword match, and value type is wrong, its comment is returned
-    :return: value corresponding the key header. String or Float. Returns None if no match
-    """
-    hrd = get_header(filepath_header, ext=ext)
-    return_val = None
-
-    # Before attempting brute search. Try getting the value directly
-    try:
-        if not regex:
-            return_val = hrd[keyword]
-        else:
-            raise KeyError
-    except KeyError:
-        for key, val in hrd.items():
-            if regex:
-                if re.search(keyword, key):
-                    return_val = val
-                elif re.search(keyword, hrd.comments[key]):
-                    return_val = val
-            else:
-                inKeyword = keyword.upper() in key.upper()
-                inComment = keyword.upper() in hrd.comments[key].upper()
-                if inKeyword:
-                    return_val = val
-                if comment and inComment:
-                    return_val = val
-            if return_val is not None:
-                if (typ is not None) and (typ is not type(return_val)):
-                    comment = hrd.comments[key].strip('/').strip()
-                    return_val = comment
-                break
-        else:
-            if raise_err:
-                raise
-            else:
-                return_val = None
-    return return_val
 
 
 def find_gain(filepath_header, namps=1):
@@ -298,7 +244,15 @@ def find_rdnoise(filepath_header, namps=1):
         return None
 
 
-# input FITS filename path
+def get_data(image, ext=0) -> np.ndarray:
+    if isinstance(image, str):
+        return fits.getdata(image, ext=ext)
+    elif isinstance(image, fits.HDUList):
+        return image[ext].data
+    else:
+        return image[ext]
+
+
 def get_header(filename_hdu, ext=0):
     """
     Get header from filepath of FITS file or HDUList object.
@@ -317,10 +271,10 @@ def get_header(filename_hdu, ext=0):
 def get_scan(hdu):
     x_range, y_range = hdu.header['BIASSEC'].strip('][').split(',')
     xstart, xend = [int(j) for j in x_range.split(':')]
-    xstart -= 1;
+    xstart -= 1
     xend -= 1
     ystart, yend = [int(j) for j in y_range.split(':')]
-    ystart -= 1;
+    ystart -= 1
     yend -= 1
     return hdu.data[ystart:yend, xstart:xend]
 
@@ -339,152 +293,327 @@ def overscan_sub(hdul):
     return trimmed_hdul
 
 
-# input list of filepaths to FITS files
-def cross_median(images_list, root_dir=None, this_type="", twilight=False):
+def get_best_comb(telescope: str, date: str, *kinds, bins=None,
+                  filt=None, twilight=True, ndims=None, ret_none=False):
     """
+    Function to get best calibration file for a dataset of given types.
+    This will return a file per each kind, in the same order as kinds.
+    These files are the combined calibrations images.
+
+    :param telescope: telescope for which to get calibration files
+    :param date: date for which to find best cal
+    :param kinds: any of types; FLAT, DARK, BIAS
+    :param bins: bins to match calibration file with
+    :param filt: filter to match calibration file with, only needed for flats
+    :param twilight: whether twilight images are allowed.
+    :param ndims: dimensions of dataset; tuple-like: (X, Y) OR (NAXIS1, NAXIS2)
+    :param ret_none: if true, function will return if no such calibration file is found; otherwise it will raise Err.
+    """
+    assert bins is not None, 'The parameter bins must be passed to match files'
+    if 'FLAT' in kinds and filt is None:
+        log('Warning. Using get_best_cal for FLAT file without passing filt arg.')
+        log('Results may vary.')
+
+    telescope = telescope.upper()
+    date = parse(date)
+    cals = []
+    comb_tree = get_calibrations(telescope, combined=True)
+    for kind in kinds:
+        kind = kind.upper()
+        root_dir = join(server_destination, 'COMBINED', telescope, kind)
+        root_join = lambda *paths: join(root_dir, *paths)
+
+        # Get all dates
+        str_dates = list(comb_tree[kind])
+
+        # Get all images!
+        images = []
+        for dt in str_dates:
+            # Get full path to images
+            imgs = map(lambda img: root_join(dt, img), comb_tree[kind][dt])
+            images.append(list(imgs))
+
+        # Decide filtering function for compatibility
+        args = (twilight, bins, filt) if filt is not None and kind == 'FLAT' else (bins,)
+        args = (args + (ndims,)) if ndims is not None else args
+        check_func = lambda img: check_comp(img, *args)
+
+        # filter out incompatible dates
+        comps = [list(map(check_func, imgs)) for imgs in images]
+        comp_dates = [str_dates[i] for i in range(len(comps)) if any(comps[i])]
+
+        # get absolute differences from given date
+        dates = [parse(dt) for dt in comp_dates]
+        diff_dates = [abs(dt - date) for dt in dates]
+
+        # if diff_dates is empty ==> No such calibration files, then return None
+        if not diff_dates:
+            if ret_none:
+                log('No %s calibration files were found for %s, skipping...' % (kind, telescope))
+                cals.append(None)
+                continue
+            else:
+                raise ValueError('No compatible calibration files were found.')
+
+        # find date closest to working date
+        indx = diff_dates.index(min(diff_dates))
+        best_date = comp_dates[indx]
+
+        # We now must grab the compatible file in the best_date
+        indx_orig = str_dates.index(best_date)
+        indx_comp = comps[indx_orig].index(True)
+        best_cal = images[indx_orig][indx_comp]
+
+        cals.append(best_cal)
+
+    # Return one object if only one kind was given.
+    if len(cals) == 1:
+        return cals[0]
+    else:
+        return cals
+
+
+def imcombine_extraops(*args, bias=False, dark=False,
+                       normalize=False, telescop=None):
+    """
+    This is a utility function that allows combination of images, while
+    applying extra operations. Most arguments are passed to `imcombine`
+    with exception of bias, normalize, dark, and date.
+
+    This function assumes all files in imcombine are of the same binning,
+    and dimensions.
+
+    :param bias:
+    :param dark:
+    :param normalize:
+    :param telescop:
+    :param args: arguments passed to imcombine in the same order
+    """
+    log('\nStarting imcombine_extraops')
+    args = list(args)
+    im_list = args[0]
+    assert isinstance(im_list, list), 'Unexpected first positional argument'
+    log('SAMPLE IMAGE INPUT: %s' % im_list[0])
+
+    # Find date for which to we're getting data
+    date = find_dates(im_list[0])[0]
+
+    log('Stacking data!')
+    start = time.time()
+    # Stack data to get median/mean across images for extension-i
+    if len(im_list) > 100:
+        # shuffle images; we'll need this in case the limit of opened files is reached
+        random.shuffle(im_list)
+        log('USING MEMMAP=FALSE and LAZY_LOAD=FALSE for im_list of %d elements' % len(im_list))
+        images = []
+        for i in range(len(im_list)):
+            try:
+                images.append(ModHDUList(im_list[i], memmap=False, lazy_load_hdus=False))
+            except OSError:
+                log('Number of opened files exceeded, max files opened: %d' % (i + 1))
+                log('Data set sample: %s' % im_list[0])
+                log('Continuing with limited shuffled list of images!')
+                # Grab up to -2 in order to allow bias/dark to open up!
+                images = images[:-2]
+                break
+    else:
+        images = [ModHDUList(im) for im in im_list]
+    end = time.time() - start
+    if end > 5.:
+        log('Data stacking took %.3f secs' % end)
+
+    bins = 1 if 'CASSINI' in im_list[0] else find_val(images[0], "bin")
+    ndims = find_dimensions(im_list[0])
+
+    if bias:
+        log('Subtracting bias frame')
+        assert telescop is not None, 'Not a date given'
+        bias_im = get_best_comb(telescop, date, 'BIAS', bins=bins, ndims=ndims)
+        log('Best BIAS frame found %s' % bias_im)
+        bias_hdul = ModHDUList(bias_im)
+        images = [hdul - bias_hdul for hdul in images]
+
+    if dark:
+        log('Subtracting dark frame')
+        assert telescop is not None, 'Not a date given'
+        dark_im = get_best_comb(telescop, date, 'DARK', bins=bins, ndims=ndims)
+        log('Best DARK frame found %s' % dark_im)
+        dark_hdul = ModHDUList(dark_im)
+        # DUE TO PRIOR COMPLICATIONS: Only apply dark substraction if values in dark image are positive (real)
+        if dark_hdul.mean() > 0:
+            images = [hdul - dark_hdul for hdul in images]
+
+    if normalize:
+        images = [hdul.flatten() for hdul in images]
+
+    # Modify args accordingly
+    args[0] = images
+
+    return imcombine(*args)
+
+
+def imcombine(images_list: list, root_dir=None, this_type="",
+              save_dir=None, combine='median', overwrite=True) -> str:
+    """
+    Warning! This function is quite inefficient with memory handling. Use with caution!
     Function will create a median FITS image retaining all header information and save it, then return
     the filepath to median file.
-    :param images_list: list of filepaths to FITS files, or a list of HDULists, or a list of lists 
+    :param images_list: list of filepaths to FITS files, or a list of HDULists, or a list of lists
     with data (numpy array) per extension
-    :param root_dir: Only Required when given image_list is a list of HDULists or numpy data
-    :param this_type:
-    :return: filepath to median file
+    :param root_dir: Only Required when given image_list is a list of HDULists or numpy data AND save_dir is not given.
+    :param this_type: this isn't required, it simply gives context to the file; stirng is appended to save_path
+    :param save_dir: directory path to which save final image
+    :param combine: combination method; 'mean' or 'median'
+    :param overwrite: whether the final image should be overwritten
+    :return: filepath to final image
     """
-    if root_dir is None:
-        # find root dir for the given files (it will be used to save the mean_file)
-        root_dir = os.path.dirname(images_list[0])
-    if twilight:
-        this_type = "Twilight-" + this_type
-    median_dir = os.path.join(root_dir, "MEDIAN:" + this_type + ".fits")
-    # the first image as template (any would work)
-    template_hdul = ModHDUList(images_list[0])
-    # add history/comment that it is a median file
-    if twilight:
-        template_hdul[0].header.add_history("TWILIGHT FLAT")
-    template_hdul[0].header.add_history("Pre-processed MEDIAN. {}".format(todays_day()))
-    # number of extensions
-    exts = len(template_hdul)
-    for i in range(exts):
-        if template_hdul[i].data is None:
-            continue
-        data_list = [ModHDUList(image)[i].data.astype(float) for image in images_list]
-        template_hdul[i].data = np.median(data_list, axis=0)
-        del data_list
-    if 'FLAT' in this_type.upper():
-        # flat tends to have negative values that impact badly...
-        template_hdul.interpolate()
-    template_hdul.writeto(median_dir, overwrite=True)
-    template_hdul.close()
-    return median_dir
+    log('\nStarting imcombine. Sample:\n%s' % images_list[0])
+    log(str(images_list))
+    log('Saving to %s' % save_dir)
 
+    combine = combine.lower()
+    # make sure combine is either 'median' or 'mean'
+    assert combine == 'median' or combine == 'mean', 'Incompatible parameter given for "combine" argument.'
 
-def cross_mean(images_list, root_dir=None, this_type="", twilight=False):
-    """
-    Function will create a mean FITS image retaining all header information and save it, then return
-    the filepath to mean file.
-    :param images_list: list of filepaths to FITS files
-    :param root_dir: Only give this parameter if the given image_list is a list of HDULists
-    :param this_type:
-    :return: filepath to mean file
-    """
-    if root_dir is None:
-        # find root dir for the given files (it will be used to save the mean_file)
-        root_dir = os.path.dirname(images_list[0])
-    if twilight:
-        this_type = "Twilight-" + this_type
-    mean_dir = os.path.join(root_dir, "MEAN:" + this_type + ".fits")
-    # use first image as template, any would work
-    template_hdul = ModHDUList(images_list[0])
+    # get number of images, and central difference function
+    central = getattr(np, combine)
+
+    # find root dir for the given files (it will be used to save the mean_file)
+    is_str = isinstance(images_list[-1], str)
+    root_dir = dirname(images_list[-1]) if root_dir is None and is_str else root_dir
+    save_dir = root_dir if save_dir is None else save_dir
+
+    # Make sure these are actual paths
+    assert isdir(save_dir) or isdir(root_dir), 'Given root_dir or save_dir are not actual paths!'
+
+    # get save path for combined file
+    combine_path = join(save_dir, '{}_{}.fits'.format(combine.upper(), this_type))
+
+    # check if this file already exist
+    exists = isfile(combine_path)
+    if exists and not overwrite:
+        log('File already exists! Skipping! %s' % combine_path)
+        return combine_path
+    elif exists and overwrite:
+        log('Overwriting combined image: %s' % combine_path)
+
+    # use the last image as template, assumed to be random one, or newest frame
+    template_hdul: ModHDUList = ModHDUList(images_list[-1]).copy()
+
     # add history/comment that it is a mean file
-    if twilight:
-        template_hdul[0].header.add_history("TWILIGHT FLAT")
-    if "DARK" in this_type.upper():
-        template_hdul[0].header.add_history("BIAS SUBTRACTED")
-    if "FLAT" in this_type.upper():
-        template_hdul[0].header.add_history("BIAS/DARK SUBTRACTED")
-    template_hdul[0].header.add_history("Pre-processed MEAN. {}".format(todays_day()))
+    template_hdul[0].header.add_history("Combined calibration image: " + combine.upper())
+
     # number of extensions
     exts = len(template_hdul)
+    log("About to loop over calibration files in imcombine")
     for i in range(exts):
         if template_hdul[i].data is None:
             continue
-        data_list = [ModHDUList(image)[i].data.astype(float) for image in images_list]
-        template_hdul[i].data = np.mean(data_list, axis=0)
-        del data_list
-    if 'FLAT' in this_type.upper():
-        # flat tends to have negative values that impact badly...
-        template_hdul.interpolate()
-    template_hdul.writeto(mean_dir, overwrite=True)
-    template_hdul.close()
-    return mean_dir
 
+        log("Getting %s for ext #%d" % (combine, i))
 
-##function takes path of FITS, bin to test. and outputs the respective boolean if the binning is correct
-def check_comp(filepath, comp, twilight_flats=False):
-    """
-    function takes a path of a fits, bin, filter or both and outputs the respective boolean if parameters
-    of the given file matches the given parameters.
-    :param filepath: filepath to fits
-    :param comp: binning and filter (either/both) of filepath to be tested against.
-    :param twilight_flats: bool indictating whether we are looking for twilight flats
-    :return: boolean corresponding whether the parameters match
-    """
-    bool_list = []
-    # check if it is a twilight_flats
-    a = "twilight" in filepath.lower()
-    b = "twilight" in find_val(filepath, "object").lower()
-    z = a or b
-    # this covers whether what happens if we are looking for twilight_flats
-    if not twilight_flats and not z:
-        z = True
-    elif not twilight_flats and z:
-        z = False
-    bool_list.append(z)
-    # specific behavior if comp is a list
-    if type(comp) is list or type(comp) is tuple:
-        # print('CHECKING COMP BIN/Filter: {}\t{}'.format(os.path.basename(filepath), comp))
-        filters, bins = comp
-        actual_bin = 1 if 'CASSINI' in filepath else find_val(filepath, "bin")
-        actual_filter = find_val(filepath, "filter", typ=str)
-        x = str(bins) in str(actual_bin)
-        y = str(filters.upper()) in str(actual_filter.upper())
-        bool_list.append(x)
-        bool_list.append(y)
-        # return x and y and z
-    else:
-        # else it must be one value, find which one (bin/filter)
+        log('Stacking data!')
+        start = time.time()
+        # Stack data to get median across images for extension-i
+        data_list = [get_data(image, i) for image in images_list]
+        end = time.time() - start
+        if end > 5.:
+            log('Data stacking took %.3f secs' % end)
+
         try:
-            # test if comp is an #, therefore testing BIN
-            float(comp)
-            actual_bin = 1 if 'CASSINI' in filepath else find_val(filepath, "bin")
-            mybool = str(comp) in str(actual_bin)
-            bool_list.append(mybool)
-        except ValueError:
-            actual_filter = find_val(filepath, "filter", typ=str)
-            x = str(comp.upper()) in str(actual_filter.upper())
-            bool_list.append(x)
-            # return x and z
-    return all(bool_list)
+            template_hdul[i].data = central(data_list, axis=0)
+        except ValueError as e:
+            # This error can be thrown if shape mismatch; make sure this is the reason...
+            if 'broadcast' not in e.args[0].lower():
+                raise
+
+            # get shapes info and update image list
+            shapes = [im.shape for im in data_list]
+            # the_shape will be the largest shape in shapes; assumed correct one.
+            the_shape = sorted(shapes, reverse=True)[0]
+
+            # log info
+            log('WARNING! Shapes of images are different. Implementing mask for filtering....')
+            log('Detection happened for extension #%d' % i)
+            log('Chosen shape as correct CCD shape: {}'.format(the_shape))
+
+            # modify images_list accordingly
+            images_list = [images_list[k] for k in len(images_list) if the_shape == shapes[k]]
+
+            # attempt again with modified images_list
+            data_list = [get_data(image, i) for image in images_list]
+            template_hdul[i].data = central(data_list, axis=0)
+
+        del data_list[:]
+        collect()
+
+    if 'FLAT' in this_type.upper():
+        template_hdul.interpolate()
+    template_hdul.writeto(combine_path, overwrite=True)
+    template_hdul.close()
+    return combine_path
 
 
-def filter_objects(obj_str, bins):
+def check_comp(filepath, *args):
     """
-    filter out object files using the following attributes:
+    Recursive solution to find compatibility of a FITS image against multiple given parameters.
+    This function will return True only when attributes of given file match the ones given.
+
+    Attributes rules:
+        - Binning: A number/string digit must be given
+        - Filter: A non-digit string must be given
+        - Twilight: A boolean  must be given indicating whether you allow twilight flats or not.
+        - Dimensions: A tuple/list must be given (X, Y) or (NAXIS1, NAXIS2)
+    :param filepath: path to FITS image/file
+    :param args: arguments that follow the attribute rules listed above
+    :return:
+    """
+    if not args:
+        return True
+    comp = args[0]
+    if comp is True:
+        return True and check_comp(filepath, *args[1:])
+    elif comp is False:
+        # assume we're getting asked about twilight_flats
+        # check if it is a twilight_flats
+        a = "twilight" in filepath.lower()
+        b = "twilight" in find_val(filepath, "object").lower()
+        z = a or b
+        # this covers whether what happens if we are looking for twilight_flats
+        return not z
+    elif isinstance(comp, (list, tuple)):
+        # assume we're getting asked about dimensions of data
+        return find_dimensions(filepath) == comp and check_comp(filepath, *args[1:])
+    elif isinstance(comp, (int, float)) or isinstance(comp, str) and all([c.isdigit() for c in comp.split()]):
+        # assume we're getting asked about binning of data
+        # hardcoded CASSINI exception; no binning keyword in headers
+        actual_bin = 1 if 'CASSINI' in filepath else find_val(filepath, "bin")
+        return str(comp) == str(actual_bin) and check_comp(filepath, *args[1:])
+    else:
+        # assume we're getting asked about filter
+        log('Checking filter in check_comp: "%s"' % comp)
+        actual_filter = find_val(filepath, "filter", is_str=True)
+        log('Actual Filter: "%s"' % actual_filter)
+        return str(comp.upper()) == str(actual_filter.upper()) and check_comp(filepath, *args[1:])
+
+
+def filter_objects(file_path, *args):
+    """
+    This is only used for target frames!
+    Filter out object files using the following attributes:
     
     'FINAL' keyword in filename (an already calibrated file)
-    object file is a directory
-    object fits has different binning
+    Object fits has different binning/filter as given
+    :param file_path: file path to frame
+    :param args: arguments passed to check_comp
+    :return: boolean determining whether this is an acceptable target frame
     """
-    filename = os.path.basename(obj_str)
-    cal_keys = ['flat', 'zero', 'bias', 'dark']
-    isCal = any([key in filename.lower() for key in cal_keys])
-    if 'FINAL' in obj_str:
+    filename = basename(file_path).lower()
+    if 'final' in filename or 'calibrated' in filename:
         return False
-    elif not os.path.isfile(obj_str):
+    elif not check_comp(file_path, *args):
         return False
-    elif not check_comp(obj_str, bins):
-        return False
-    elif isCal:
+    elif any([key in filename for key in ['flat', 'zero', 'bias', 'dark']]):
         return False
     else:
         return True
@@ -497,22 +626,20 @@ def get_comp_info(obj_address):
     :param obj_address: this is the parsed address of the object files.
     :return: a list containing the BIN #, and the filter of the object.
     """
-    if os.path.isfile(obj_address):
+    if isfile(obj_address):
         file_name = obj_address
     else:
-        file_name = list(search_all_fits(obj_address))[0]
+        file_name = next(search_all_fits(obj_address))
     hdul = ModHDUList(file_name)
     num_amps = len(hdul)
     if num_amps > 1 and hdul[0].data is None:
         num_amps -= 1
     gains = find_gain(hdul[0].header, num_amps)
     rdnoises = find_rdnoise(hdul[0].header, num_amps)
-    m = True
-    if gains is None or rdnoises is None:
-        m = False
+    m = False if gains is None or rdnoises is None else True
     bins = 1 if 'CASSINI' in obj_address else find_val(file_name, "bin")
     y = [i for i in bins if i.isdigit()][0] if isinstance(bins, str) else bins
-    x = find_val(file_name, "filter", typ=str)
+    x = find_val(file_name, "filter", is_str=True)
     z = find_val(file_name, "exptime")
     comp = [x, y, z, m]
     # log(comp)
@@ -522,73 +649,185 @@ def get_comp_info(obj_address):
     return comp
 
 
-def search_median(calibration, comp, twi_flat=False, recycle=False, median_opt=True, print_out=None):
+def arguments_bd(kind, cals_tree, combs_tree, calpath):
     """
-    This function searches the calibration files in the given calibrations folder. It searches for specific
-    binning and filter calibration files.
-    :param calibration: address directory of the calibration files necessary for the objects
-    :param comp: compatibility information list, binning and filter
-    :param twi_flat: True if you want to apply twilight flats or False to use regular flats (or anything is found)
-    :param recycle: True if  you want to try to find already calculated super calibration files, False otherwise
-    :param median_opt: True if you want to apply MEDIAN to all central tendency applications, False to use MEAN
-    :return: A list of the following [ superbias_path, superdark_path, superflats_path, exposureTime_Darks]
+    Helper function generator for update_calibrations function.
+
+    Arguments function that generates the positional arguments needed
+    to compute combination of bias/flats/darks.
+    Arguments to yield for imcombine, see imcombine for args overview
+
+    This is a helper function for the multiprocessing capability
+    of update_calibrations.
+
+    :param kind: type target to compute combination: bias/flat/darks
+    :param cals_tree: dictionary representing the directory structure of Calibrations folder
+    :param combs_tree: dictionary representing the directory structure of Calibrations folder
+    :param calpath: calibrations directory folder up to telescope's choice.
+                    e.g '/home/Data/Calibrations/GUFI'
+    :return: yields arguments
     """
-    filters, bins = comp[:2]
-    global num_flats, num_bias, num_darks, printout
-    if print_out is None:
-        printout = print
-    else:
-        printout = print_out.emit
-    if median_opt:
-        method = 'median'
-        central_method = cross_median
-    else:
-        method = 'mean'
-        central_method = cross_mean
-    basename = os.path.basename
-    # setup flags to use in calculation process
-    darks_flag = True
-    darks_norm = False
-    flats_calculation = True
-    bias_calculation = True
-    darks_calculation = True
-    # setup lists to use in search for fits
-    bias = []
-    darks = []
+    kind = kind.upper()
+    log('Executed arugments_bd for %s' % calpath)
+    log('Looking for %s' % kind)
+
+    # Get dates!
+    cal_dates = {*cals_tree[kind]}
+    comb_dates = {*combs_tree[kind]}
+
+    # false positives; date folders that are empty from COMBINED
+    false_positives = {date for date in comb_dates if combs_tree[kind][date] == {}}
+    # extras; date folders from COMBINED that don't exist in Calibrations folder.
+    extras = comb_dates - cal_dates
+    # date folders that have more than one image from Calibrated
+    true_cal_dates = {date for date in cal_dates if len(cals_tree[kind][date]) > 1}
+
+    # missing; dates that need to be combined
+    missing = (true_cal_dates - comb_dates | false_positives) - extras
+
+    # Let there no mistake that missing are all dates
+    missing = fnmatch.filter(missing, '*-*-*')
+
+    log('Missing data sets:\n%r' % (missing,))
+    for date in missing:
+        # Get rootdir and save dir, then validate
+        rootdir = join(calpath, kind, date)
+        save_dir = join(calpath.replace('Calibrations', 'COMBINED'), kind, date)
+        validate_dirs(save_dir)
+
+        # get pathfiles for all FITS in given date
+        im_list = [join(rootdir, f) for f in filter_fits(cals_tree[kind][date])]
+        imrange = range(len(im_list))
+
+        # Get parallel list of bin numbers, and another of image dimensions
+        if 'CASSINI' in calpath:
+            bin_list = len(im_list) * [1]
+        else:
+            bin_list = [find_val(im, 'BIN') for im in im_list]
+
+        dim_list = [find_dimensions(im) for im in im_list]
+
+        # iterate over unique bin numbers!
+        for bins in set(bin_list):
+            # Check dimensions of this dataset, and make sure they match
+            dims = [dim_list[i] for i in imrange if bin_list[i] == bins]
+            max_dim = max(dims)
+
+            imgs = [im_list[i] for i in imrange if bin_list[i] == bins and max_dim == dim_list[i]]
+            imgsrange = range(len(imgs))
+
+            if kind == 'FLAT':
+                # get all filters of data
+                filts = [find_val(im, "filter", is_str=True) for im in imgs]
+                # iterate over unique filters
+                for filt in set(filts):
+                    flats = [imgs[i] for i in imgsrange if filts[i] == filt]
+                    yield flats, 'Flats.BIN%d.%s.%s' % (bins, filt, date), save_dir
+            else:
+                yield imgs, kind + '.BIN%d.%s' % (bins, date), save_dir
+
+
+def update_calibrations(telescope, method='median', processes=4):
+    """
+    Perform combination of calibration files; bias, flats, darks
+    A combination of calibration files is performed per date.
+    :param telescope: telescope for which date to perform
+    :param method: method to use for image combinations
+    :param processes:
+    """
+    global arg_wrapper
+    assert method == 'median' or method == 'mean', 'Attribute method must be "mean" or "median"'
+    log('\nUpdating calibration data for %s' % telescope)
+
+    # get calibrations folder for selected telescope
+    cals = join(server_destination, 'Calibrations', telescope)
+    comb = join(server_destination, 'COMBINED', telescope)
+
+    # create directories for calibration files,
+    validate_dirs(join(comb, 'FLAT'), join(comb, 'BIAS'), join(comb, 'DARK'))
+
+    # get directory tree of telescope's calibrations
+    cals_tree, combs_tree = get_calibrations(telescope, both=True)
+
+    # define wrapper for argument generator to complete all args:
+    def arg_wrapper(*args):
+        args_gen = arguments_bd(*args)
+        for images, this_type, save_dir in args_gen:
+            yield images, None, this_type, save_dir, method
+
+    # check if there are bias, if so perform combinations for bias per date
+    if 'BIAS' in cals_tree:
+        log('Performing combinations for bias files per date')
+        # initialize multiprocessing pool in context manager
+        with Pool(processes=processes) as pool:
+            args_gen = arg_wrapper('Bias', cals_tree, combs_tree, cals)
+            pool.starmap(imcombine, args_gen)
+
+    # check if there are darks, if so perform combinations for darks per date
+    dark_flag = 'DARK' in cals_tree and len(cals_tree['DARK']) > 0
+    if dark_flag:
+        log('Performing combinations for darks files per date')
+        partial_imcombine = partial(imcombine_extraops, bias=True, dark=False,
+                                    normalize=False, telescop=telescope)
+        # initialize multiprocessing pool in context manager
+        with Pool(processes=processes) as pool:
+            args_gen = arg_wrapper('Dark', cals_tree, combs_tree, cals)
+            pool.starmap(partial_imcombine, args_gen)
+
+    # check if there are flats, if so perform combinations for flats per date
+    if 'FLAT' in cals_tree:
+        log('Performing combinations for flats files per date')
+        partial_imcombine = partial(imcombine_extraops, bias=True, dark=dark_flag,
+                                    normalize=True, telescop=telescope)
+        # initialize multiprocessing pool in context manager
+        with Pool(processes=processes) as pool:
+            args_gen = arg_wrapper('Flat', cals_tree, combs_tree, cals)
+            pool.starmap(partial_imcombine, args_gen)
+
+
+def find_calibrations(calibrations, filters, bins, central_flag, recycle=False, twi_flat=False, debug=False):
     flats = []
-    bias_median = False
-    darks_median = False
-    flats_median = False
-    super_cal_found = False
-    central_flag = "MEDIAN" if median_opt else "MEAN"
-    log("Searching and filtering calibration files")
-    # edit for calibrations in different folders
-    all_calibs = []
-    for i in range(len(calibration)):
-        for j in search_all_fits(calibration[i]):
-            all_calibs.append(j)
-    for filepath in all_calibs:
+    darks = []
+    bias = []
+    bias_median = darks_median = flats_median = super_cal_found = False
+
+    if debug:
+        log("Searching and filtering calibration files")
+
+    for filepath in calibrations:
         filename = basename(filepath)
-        # Compatibility test is overriden if calibration is done on CASSINI Files. Due to the fact
-        # that there is no binning keyword in their calibrations headers.
-        compatibility = '/CASSINI/' in calibration or check_comp(filepath, bins)
-        if not compatibility:
-            log("%s Not Compatible" % filename)
+
+        # check binning compatibility
+        if not check_comp(filepath, bins):
+            if debug:
+                log("%s Not Compatible" % filename)
             continue
-        log("%s Compatible" % filename)
-        # capture all median/mean files
+        if debug:
+            log("%s Compatible" % filename)
+
+        # check for type; FLAT/DARK/BIAS
+        this_imagetype = find_imgtype(filepath)
+
+        # check if is recyclable file
         if recycle and central_flag in filename:
-            log("Super Calibration file found while filtering: %s" % filename)
-            if "FLAT" in filename.upper():
-                if check_comp(filepath, filters, twilight_flats=twi_flat):
+            if debug:
+                log("Super Calibration file found while filtering: %s" % filename)
+            if "FLAT" == this_imagetype:
+                if check_comp(filepath, filters, twi_flat):
                     flats_median = filepath
-            elif "BIAS" in filename.upper():
+            elif "BIAS" == this_imagetype or "ZERO" == this_imagetype:
                 bias_median = filepath
-            elif "DARK" in filename.upper():
+            elif "DARK" == this_imagetype:
                 darks_median = filepath
             super_cal_found = flats_median and bias_median and darks_median
-            continue
-        this_imagetype = find_imgtype(filepath)
+
+            # if we have all median/mean files, then no need to keep looking
+            if super_cal_found:
+                break
+            else:
+                continue
+
+        # check type and append to corresponding list
         if "DARK" == this_imagetype:
             darks.append(filepath)
             continue
@@ -596,142 +835,13 @@ def search_median(calibration, comp, twi_flat=False, recycle=False, median_opt=T
             bias.append(filepath)
             continue
         elif "FLAT" == this_imagetype:
-            if check_comp(filepath, filters, twilight_flats=twi_flat):
+            if check_comp(filepath, filters, twi_flat):
                 flats.append(filepath)
             continue
-        if super_cal_found:
-            break
-    num_bias = len(bias)
-    num_darks = len(darks)
-    num_flats = len(flats)
-    if num_bias == 0 or num_flats == 0:
-        printout("Either no bias or flat files found."
-                 " If you want to find the 'superFlat' or 'superBias' sperately,"
-                 "use cross_median or cross_mean instead of this function. Exiting...")
-        return None
-    # no existing darks, then set flag to False
-    darks_flag = True if super_cal_found else len(darks) > 0
-    ################ Evaluate found median files for re-using#######################
-    # initialize variables
-    if recycle:
-        if darks_flag:
-            exptime_dark = find_val(darks_median, "exptime") if darks_median else 1
-        else:
-            darks_median = None
-            exptime_dark = 1
-        # if all super calibration files are available, then return them
-        if bias_median and flats_median and darks_median is not False:
-            log('------MEDIANS FILES WERE FOUND------')
-            log('{}\t{}\t{}'.format(bias_median, darks_median, flats_median))
-            printout('Found MEDIAN Files. Skipping MEDIAN calibration files calculations...'
-                     " CONTINUING WITH OBJECT FILES")
-            return bias_median, darks_median, flats_median, exptime_dark
-        else:
-            # if at least one is available then re-use them
-            if bias_median:
-                log("----------BIAS ALREADY CALCULATED FOUND----------")
-                bias_calculation = False
-            if darks_median is not False:
-                log("----------DARKS ALREADY CALCULATED FOUND----------")
-                darks_calculation = False
-            if flats_median:
-                log("----------FLATS ALREADY CALCULATED FOUND----------")
-                flats_calculation = False
-    log("----------CALIBRATIONS FILES ARE NOW REDUCING--------")
-    printout("Found: {} bias files\n\t{} darks files\n\t{} "
-             "flats files\nCalibration files are now reducing".format(num_bias, num_darks, num_flats))
-    # this is done for every flat to make in case exptime was changed at some point
-    if darks_flag:
-        # exptime_dark will be the exptime at all times, normalizing is applied if necessary
-        exptime_flats = [find_val(x, 'exptime') for x in flats]
-        exptime_darks = {find_val(x, 'exptime') for x in darks}
 
-        exptime_dark = find_val(darks[0], "exptime")
-        if len(exptime_darks) > 1:
-            printout("Exposure time of darks varies, applying normalizing method")
-            darks_norm = True
-        # alphas is a list of normalization constants for the darks during subtraction from super flat
-        alphas = list(map(lambda x: x / exptime_dark, exptime_flats))
-    else:
-        darks_median = None
-        exptime_dark = 1
-        alphas = np.zeros(len(flats))
-
-    ###############################################################################
-    ##########################----BIAS CALCULATIONS ----##########################
-    if bias_calculation:
-        bias_median = central_method(bias, this_type="Bias.BIN{}".format(bins))
-        log("----------BIAS CALCULATION COMPLETED----------")
-        printout("----------BIAS CALCULATION COMPLETED----------")
-    ##########################----END BIAS CALCULATIONS ----##########################
-    ##################################################################################
-
-    ###############################################################################
-    ##########################----DARKS CALCULATIONS ----##########################
-    # open file in memory
-    bias_med = fits.open(bias_median, memmap=False)
-    if darks_calculation and darks_flag:
-        unbiased_darks = []
-        for dark in darks:
-            raw_dark = ModHDUList(dark)
-            if darks_norm:
-                # applying darks normalization
-                this_exposure = find_val(dark, "exptime")
-                if exptime_dark != this_exposure:
-                    # subtract bias
-                    raw_dark = raw_dark - bias_med
-                    # normalize to exptime_dark
-                    constant = exptime_dark / this_exposure
-                    raw_dark = raw_dark * constant
-                    # change EXPTIME to display normalized exptime
-                    raw_dark[0].header['EXPTIME'] = exptime_dark
-                    unbiased_darks.append(raw_dark)
-                    del raw_dark
-                    continue
-            unbiased_darks.append(raw_dark - bias_med)
-            # collect() is python's garbage collector (memory release)
-            collect()
-        root_darks = os.path.dirname(darks[0])
-        darks_median = central_method(unbiased_darks, root_dir=root_darks, this_type="Darks.BIN{}".format(bins))
-        # unload the memory space/ a lot of memory must be used for unbiased_darks
-        del unbiased_darks
-        log("----------DARKS CALCULATION COMPLETED----------")
-        printout("----------DARKS CALCULATION COMPLETED----------")
-    ##########################----END DARKS CALCULATIONS ----##########################
-    ###################################################################################
-
-    ###############################################################################
-    ##########################----FLATS CALCULATIONS ----##########################
-    if flats_calculation:
-        # THIS IS DONE THIS WAY, TO AVOID MISMATCHES OF NORMALIZATION WHEN SUBTRACTING
-        root_flats = os.path.dirname(flats[0])
-        fixed_flats_list = []
-        flat_append = fixed_flats_list.append
-        fits.conf.use_memmap = False
-        dark_med = ModHDUList(darks_median) if darks_flag else 1
-        for i, flat in enumerate(flats):
-            raw_flat = ModHDUList(flat)
-            super_bias = bias_med - (dark_med * alphas[i]) if darks_flag else bias_med
-            # super_bias is either just the bias or the bias minus the dark frame
-            calibrate_flat = raw_flat - super_bias
-            calibrate_flat = calibrate_flat.flatten(method=method)
-            flat_append(calibrate_flat)
-            del raw_flat
-            collect()
-        del bias_med
-        if darks_flag:
-            del dark_med
-        flats_median = central_method(fixed_flats_list, root_dir=root_flats,
-                                      this_type="Flats.{}.BIN{}".format(filters, bins), twilight=twi_flat)
-        fits.conf.use_memmap = True
-        del fixed_flats_list
-        log("----------FLATS CALCUATION COMPLETED----------")
-        printout("----------FLATS CALCUATION COMPLETED----------")
-    ##########################----END FLATS CALCULATIONS ----##########################
-    ###################################################################################
-
-    printout("CALIBRATION FILES WERE REDUCED.. CONTINUING WITH OBJECT FILES")
-    return bias_median, darks_median, flats_median, exptime_dark
+    # if no dark frames, then set flag to False
+    darks_flag = super_cal_found or len(darks) > 0
+    return bias, flats, darks, bias_median, darks_median, flats_median, darks_flag
 
 
 def trim_reference_image(image, image2) -> ModHDUList:
@@ -739,8 +849,8 @@ def trim_reference_image(image, image2) -> ModHDUList:
     Trim HDUList (image) according to reference window of other HDUList (image2)
     Uses following range format to trim image:
     DATASEC = [X1, Y1, X2, Y2]
-    :param image: Image to be trimmed
-    :param image2: Image to use for reference trim section
+    :param image: Image to be trimmed: HDUList
+    :param image2: Image to use for reference trim section; HDUList
     :returns new_image: New HDUList of trimmed image(s)
     """
     # copy the HDUList
@@ -776,14 +886,16 @@ def prepare_cal(filepath: str, *args) -> (list, tuple):
 
 def verify_window(filepath, *args) -> (list, tuple):
     """
-    verify existence of windowed file and trim accordingly
+    Verify existence of windowed file and trim accordingly.
+    The  only dataset that are being trimmed is CAHA/CASSINI Data.
+
     :param filepath: filepath/HDUList to object image which you want to use as reference windowed frame
     :param args: ModHDUList/HDUList objects that you want to trim
     :return: list of given objects trimmed, same order
     """
     window = False
     isWindowed = False
-    if '/CAHA/' in filepath:
+    if 'CAHA' in filepath:
         # all CAHA images have the DATASEC keyword. We verify if image is windowed by seeing if section
         # is not equal to maximum detector window [0, 0, 4096, 4112]
         window = find_val(filepath, 'DATASEC')
@@ -791,10 +903,10 @@ def verify_window(filepath, *args) -> (list, tuple):
     elif 'CASSINI' in filepath:
         # Cassini's window verification is different due to the fact that windows are manually set
         # therefore, not every cassini data set will have a 'DATASEC' keyword in the header
-        window = find_val(filepath, 'DATASEC') if 'DATASEC' in fits.getheader(filepath) else False
-        isWindowed = True if window else False
+        window = find_val(filepath, 'DATASEC', raise_err=False)
+        isWindowed = False if window is None else True
     if window and isWindowed:
-        log("FOUND CAHA WINDOW:\n\tFile:{}\n\tWINDOW:{}".format(os.path.basename(filepath), window))
+        log("FOUND DATASEC WINDOW:\n\tFile:{}\n\tWINDOW:{}".format(basename(filepath), window))
         ref_window = ModHDUList(filepath)
         new_args = []
         for i in range(len(args)):
@@ -819,12 +931,7 @@ def last_processing2(obj, beta, flats_median, darks_median, bias_median, final_d
     filename = obj.split('/')[-1]
     this_filename = "Calibrated_" + filename
     log("Calibrating object frame: %s" % filename)
-    mem = psutil.virtual_memory().percent
-    #if mem > 90.:
-    #    log("Memory usage spiked to {}%. Skipping frame {}".format(mem, filename))
-    #    print('Mem problem')
-    #    return False
-    save_to_path = os.path.join(final_dir, this_filename)
+    save_to_path = join(final_dir, this_filename)
     obj_image = ModHDUList(obj)
     exts = len(bias_median)
     super_bias = [None if bias_median[i] is None else bias_median[i] + darks_median[i]*beta for i in range(exts)]
@@ -834,15 +941,17 @@ def last_processing2(obj, beta, flats_median, darks_median, bias_median, final_d
     # INTERPOLATE RIGHT BEFORE SAVING
     # try to get rid of infs/nans/zeroes
     final_image.interpolate()
-    final_image[0].header.add_history(
-        "Calibrated Image: Bias subtracted, Flattened, and Cosmic Ray Cleansed"
-    )
+    final_image[0].header.add_history("Calibrated Image: Bias subtracted, Flattened, and Cosmic Ray Cleansed")
     final_image.writeto(save_to_path, overwrite=True)
     final_image.close()
-    collect()
 
 
 def cosmic_ray(hdul):
+    """
+    Cosmic Ray Removal function. Assumes  gain/rdnoise info in headers.
+    :param hdul: HDUList
+    :return: new HDUList
+    """
     num_amps = len(hdul)
     if num_amps > 1 and hdul[0].data is None:
         num_amps -= 1
@@ -850,211 +959,22 @@ def cosmic_ray(hdul):
     rdnoises = find_rdnoise(hdul[0].header, num_amps)
     kwargs = {'sigclip': 4.5, 'objlim': 6, 'gain': 2., 'readnoise': 6.,
               'sepmed': True, 'cleantype': "idw", "verbose": True}
+    if gains is None:
+        gains = np.ones(num_amps) * 2.
+    if rdnoises is None:
+        rdnoises = np.ones(num_amps) * 6.
+
     amp_count = 0
     for i in range(len(hdul)):
         if hdul[i].data is None:
             continue
-        data = hdul[i].data
+        # update keywords
         kwargs['gain'] = gains[amp_count]
         kwargs['readnoise'] = rdnoises[amp_count]
+
+        data = hdul[i].data
         newdata, mask = cosmicray_lacosmic(data, **kwargs)
         hdul[i].data = newdata / gains[amp_count]
         amp_count += 1
     hdul[0].header.add_history('LaPlacian Cosmic Ray removal algorithm applied')
     return hdul
-
-
-def full_reduction(objects, calibrations, twilight_flats=False, split=3, recycle=False, median_opt=True,
-                   print_out=None):
-    """
-    The function fully reduces the object files given the biases/flats/darks.
-    This processing function works for almost all kinds of scenarios, must keep testing.
-    :param objects: This can be the address of the object files or a list of selected object files.
-    :param calibrations: This can be the address of all calibration files or a list of the following:
-    FLATS MEDIAN FILEPATH, DARKS MEDIAN FILEPATH, BIAS MEDIAN FILEPATH, exposure time of darks value.
-    :param twilight_flats: Set True, and function will only use twilight flats, else it will use regular ones.
-    :param split: Default=3, This parameter will split the reduction into a number of subprocess,
-     possibly speeding up the reduction time
-    :param recycle: Default=False. If set to True, the program will use a compatible MEDIAN calibration file if found.
-    :return: The program saves the final images to a new folder in the given objects-address.
-    """
-    global printout
-    # printout = print_out
-    log("\n{0}FULL REDUCTION STARTED{0}\n".format("-" * 7))
-    if print_out is None:
-        printout = print
-    else:
-        printout = print_out.emit
-    printout("FULL REDUCTION STARTED")
-    print(type(objects))
-    ############################################################
-    # parse directory folders
-    flag_cal_list = False
-    flag_objs_list = False
-    if type(calibrations) is str:
-        print("Calibrations variable is a string... assuming it is path to calibrations folder")
-        calibrations = calibrations.rstrip(os.sep)
-        x = os.path.isdir(calibrations)
-    else:
-        print("Calibrations variable is a list... assuming it is a list of calibration filepaths")
-        mybool_list = []
-        for i in range(len(calibrations)):
-            calibrations[i] = calibrations[i].rstrip(os.sep)
-            mybool_list.append(os.path.isfile(calibrations[i]))
-        x = all(mybool_list)
-        flag_cal_list = True
-    if type(objects) is str:
-        print("Objects variable is a string... assuming it is path to object frames folder")
-        objects = objects.rstrip(os.sep)
-        y = os.path.isdir(objects)
-    else:
-        print("Objects variable is a list... assuming it is a list of object frames filepaths")
-        mybool_list = []
-        for i in range(len(objects)):
-            objects[i].rstrip(os.sep)
-            mybool_list.append(os.path.isfile(objects[i]) or os.path.isdir(objects[i]))
-        y = all(mybool_list)
-        flag_objs_list = True
-    if x and y:
-        log("All Input files exist... continuing processing")
-    else:
-        log("At least one of the input files don't exist, quitting.")
-        raise(ValueError('At least one of the input files don\'t exist, quitting.'))
-
-    #############################################################
-    # get compatibility factors (filter/binning/exposure time obj), extra one to see if read noise exists in header
-    if flag_objs_list:
-        comp = get_comp_info(objects[0])
-    else:
-        comp = get_comp_info(objects)
-    filters, bins, exptime_obj, rdnoise_gain = comp
-    # calculate median/mean calibration fles using search_median
-    if not flag_cal_list:
-        # assumes calibrations is a string (directory path)
-        bias_median, darks_median, flats_median, exptime_dark = search_median(calibrations,
-                                                                              comp,
-                                                                              twi_flat=twilight_flats,
-                                                                              recycle=recycle,
-                                                                              median_opt=median_opt,
-                                                                              print_out=print_out)
-    elif flag_cal_list:
-        # else assumes calibrations files are given
-        bias_median, darks_median, flats_median, exptime_dark = calibrations
-    else:
-        log("Calibrations variable is neither a sequence or a string, quitting...")
-        raise ValueError("Calibrations variable is neither a sequence or a string, quitting...")
-    # If read noise doesn't exist in at least one header, calculate and put in header files.
-    if not rdnoise_gain:
-        printout("Information about ReadNoise or Gain couldn't be found... Assigning New Values")
-        log("Information about ReadNoise or Gain couldn't be found... Assigning New Values")
-        # parse calibrations folder/file path
-        cal_folder = calibrations if type(calibrations) is str else os.path.dirname(calibrations)
-        mybool_list = [key in cal_folder for key in ['BIAS', 'ZERO', 'FLAT', 'DARK']]
-        if any(mybool_list):
-            cal_folder = os.path.dirname(cal_folder)
-        # setup search for available filters to use
-        all_filters = []
-        all_filters_append = all_filters.append
-        for filepath in search_all_fits(cal_folder):
-            image_type = find_imgtype(filepath)
-            if image_type == 'FLAT':
-                this_filter = find_val(filepath, 'filter')
-                all_filters_append(this_filter)
-        avfilters = list(set(all_filters))
-        log("Found set of filters: {}".format(avfilters))
-        # choosing flat frame filter to use, preference given to clear/blank/open filter labels
-        filtr = random.choice(list(avfilters))
-        for filter_type in ['clear', 'blank', 'open']:
-            isFound = False
-            for avfilter in avfilters:
-                if filter_type.upper() in avfilter.upper():
-                    filtr = avfilter
-                    break
-            if isFound:
-                break
-        log("Applying get_gain_rdnoise function...")
-        gains, read_noises = get_gain_rdnoise(cal_folder, bins=bins, filters=filtr)
-        log("get_gain_rdnoise sucessful")
-        telescop = '/'.join(cal_folder.split('/')[:-1])
-        printout("Assigninig following gain values:\n{}\n...and readnoise:\n{}".format(gains, read_noises))
-        for i in range(len(gains)):
-            value_set = 'GAIN{}'.format(i + 1), gains[i]
-            comm = 'EDEN Corrected Gain of AMP{} in units of e-/ADU'.format(i + 1)
-            set_mulifits(telescop, '*.fits', value_set, comment=comm, keep_originals=False)
-            value_set = 'RDNOISE{}'.format(i + 1), read_noises[i]
-            comm = 'EDEN Corrected Read Noise of AMP{} in units of e-'.format(i + 1)
-            set_mulifits(telescop, '*.fits', value_set, comment=comm, keep_originals=False)
-        log("Values have been assigned!... Continuing Calibration.")
-        printout("Values have been assigned!... Continuing Calibration.")
-    # set up object files for calibration
-    if flag_objs_list:
-        final_dir = os.path.dirname(objects[0]).replace("raw", 'cal')
-        if final_dir == os.path.dirname(objects[0]):
-            final_dir = os.path.join(os.path.dirname(objects[0]), 'calibrated')
-        list_objects = objects
-    else:
-        final_dir = objects.replace("raw", 'cal')
-        list_objects = list(search_all_fits(objects))
-        if final_dir == objects:
-            final_dir = os.path.join(objects, 'calibrated')
-    if not os.path.isdir(final_dir):
-        os.makedirs(final_dir)
-    filtered_objects = [obj_path for obj_path in list_objects if filter_objects(obj_path, bins)]
-    # beta variable is to be multiplied by the corrected_darks to normalize it in respect to obj files
-    betas = [find_val(objs, 'exptime') / exptime_dark for objs in filtered_objects]
-    assert len(betas) == len(filtered_objects), "For some reason betas and objects aren't the same size"
-
-    # set up calibration files to pickle through multiprocessing
-    t0 = time.time()
-    normflats = ModHDUList(flats_median)
-    medbias = ModHDUList(bias_median)
-    # try to get rid of infs/nans/zeroes
-    normflats.interpolate()
-    if darks_median:
-        meddark = ModHDUList(darks_median)
-        _list = [normflats, meddark, medbias]
-        normflats, meddark, medbias = prepare_cal(filtered_objects[0], *_list)
-    else:
-        _list = [normflats, medbias]
-        normflats, medbias = prepare_cal(filtered_objects[0], *_list)
-        meddark = [np.zeros(normflats[i].shape) for i in range(len(normflats))]
-    lapse = time.time() - t0
-    log("Preparation right before calibration took %.4f " % lapse)
-
-    # create arguments list/iterator
-    arguments = []
-    for obj, beta in zip(filtered_objects, betas):
-        # each argument will have an object frame, normalization constant(Beta), and directory names of
-        # super calibration files, and final directory for object frames.
-        arguments.append((obj, beta, normflats, meddark, medbias, final_dir))
-    # initialize multiprocessing pool in try/except block in order to avoid problems
-    pool = Pool(processes=split)
-    try:
-        t0 = time.time()
-        pool.starmap(last_processing2, arguments)
-        lapse = time.time() - t0
-        log("WHOLE CALIBRATION PROCESS IN ALL FILES TOOK %.4f" % lapse)
-    except Exception:
-        log("An error occurred during the multiprocessing, closing pool...")
-        raise
-    finally:
-        # the finally block will ensure the pool is closed no matter what
-        pool.close()
-        pool.join()
-        del arguments[:]
-    log("FULL DATA REDUCTION COMPLETED")
-    printout("REDUCTION COMPLETED!")
-
-
-if __name__ == '__main__':
-    # from DirSearch_Functions import walklevel
-    # import fnmatch
-    import glob
-
-    dirs = glob.glob('/Volumes/home/Data/KUIPER/raw/*/*/*')
-    dirs.pop(3)
-    cal = '/Volumes/home/Data/KUIPER/Calibrations'
-    print(dirs)
-    for one_dir in dirs:
-        print(" {} STARTED".format(one_dir))
-        full_reduction(one_dir, cal, recycle=True)
