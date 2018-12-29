@@ -468,7 +468,6 @@ def imcombine(images_list: list, root_dir=None, this_type="",
     :return: filepath to final image
     """
     log('\nStarting imcombine. Sample:\n%s' % images_list[0])
-    log(str(images_list))
     log('Saving to %s' % save_dir)
 
     combine = combine.lower()
@@ -591,9 +590,7 @@ def check_comp(filepath, *args):
         return str(comp) == str(actual_bin) and check_comp(filepath, *args[1:])
     else:
         # assume we're getting asked about filter
-        log('Checking filter in check_comp: "%s"' % comp)
         actual_filter = find_val(filepath, "filter", is_str=True)
-        log('Actual Filter: "%s"' % actual_filter)
         return str(comp.upper()) == str(actual_filter.upper()) and check_comp(filepath, *args[1:])
 
 
