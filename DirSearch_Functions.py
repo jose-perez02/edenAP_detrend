@@ -11,8 +11,8 @@ from dirs_mgmt import copy, mv, shorten_path, walklevel
 todays_day = todays_date.date()
 
 
-def set_mulifits(src_path, pattern, value_setting, comment=None, level=100, destination="",
-                 keep_originals=True, print_out=None):
+def set_multifits(src_path, pattern, value_setting, comment=None, level=100, destination="",
+                  keep_originals=True):
     """
     The function will set the given keyword value to all FITS files with the matching root name in
     the directory sublevels. This function can also create a new keyword/value from the value_setting parameters, which would
