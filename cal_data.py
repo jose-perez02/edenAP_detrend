@@ -7,11 +7,9 @@ from multiprocessing import Pool
 from os.path import join, isdir, isfile, dirname, basename
 
 import numpy as np
-from astropy import units as u
 from astropy.io import fits
-from astropy.modeling import models
-from astropy.nddata import CCDData
-from ccdproc import trim_image, subtract_overscan, cosmicray_lacosmic
+from astropy.modeling import models, fitting
+from ccdproc import cosmicray_lacosmic
 from dateutil.parser import parse
 
 from DirSearch_Functions import search_all_fits
@@ -268,28 +266,84 @@ def get_header(filename_hdu, ext=0):
     return header
 
 
-def get_scan(hdu):
-    x_range, y_range = hdu.header['BIASSEC'].strip('][').split(',')
-    xstart, xend = [int(j) for j in x_range.split(':')]
-    xstart -= 1
-    xend -= 1
-    ystart, yend = [int(j) for j in y_range.split(':')]
-    ystart -= 1
-    yend -= 1
-    return hdu.data[ystart:yend, xstart:xend]
+def get_secs(hdu: fits.ImageHDU):
+    # Return BIASSEC & DATASEC as numpy index.
+    # Return DATASEC ONLY if BIASSEC doesn't exist.
+    # Return None if neither keyword is found
+    hdr = hdu.header
+    if 'BIASSEC' in hdr:
+        biassec = hdr['BIASSEC'].replace(':', ',').strip('][').split(',')
+    else:
+        biassec = None
+
+    if 'DATASEC' in hdr:
+        datasec = hdr['DATASEC'].replace(':', ',').strip('][').split(',')
+    else:
+        datasec = None
+
+    if not datasec and not biassec:
+        return None
+    elif datasec and not biassec:
+        x1, x2, y1, y2 = [int(c) for c in datasec]
+        x1, y1 = x1 - 1, y1 - 1
+        if y2 < y1 or x2 < x1:
+            # Indicates CAHA/CASSINI-LIKE FORMAT
+            x1, y1, x2, y2 = [int(c) for c in datasec]
+        return np.s_[y1:y2, x1:x2]
+    else:
+        # Both exist!
+        x1, x2, y1, y2 = [int(c) for c in datasec]
+        x1, y1 = x1 - 1, y1 - 1
+        if y2 < y1 or x2 < x1:
+            # Indicates CAHA/CASSINI-LIKE FORMAT
+            x1, y1, x2, y2 = [int(c) for c in datasec]
+
+        dataslice = np.s_[y1:y2, x1:x2]
+
+        x1, x2, y1, y2 = [int(c) for c in biassec]
+        x1, y1 = x1 - 1, y1 - 1
+        if y2 < y1 or x2 < x1:
+            # Indicates CAHA/CASSINI-LIKE FORMAT
+            x1, y1, x2, y2 = [int(c) for c in biassec]
+
+        biasslice = np.s_[y1:y2, x1:x2]
+        return dataslice, biasslice
 
 
 def overscan_sub(hdul):
+    """
+    Subtract overscan region of frame
+    """
+    hdul = ModHDUList(hdul)
     exts = len(hdul)
-    trimmed_hdul = ModHDUList([hdu.copy() for hdu in hdul])
+    trimmed_hdul = hdul.copy()
     for i in range(exts):
-        if hdul[i].data is not None:
-            if 'BIASSEC' in hdul[i].header and 'TRIMSEC' in hdul[i].header:
-                data = hdul[i].data
-                ccdData = CCDData(data, unit=u.adu)
-                poly_model = models.Polynomial1D(3)
-                oscan_subtracted = subtract_overscan(ccdData, fits_section=hdul[i].header['BIASSEC'], model=poly_model)
-                trimmed_hdul[i].data = trim_image(oscan_subtracted, fits_section=hdul[i].header['TRIMSEC']).data
+        if hdul[i].data is None:
+            continue
+        secs = get_secs(hdul[i])
+        if isinstance(secs, tuple):
+            dataslice, biasslice = secs
+            data = hdul[i].data[dataslice]
+            bias = hdul[i].data[biasslice]
+            axis = 0 if bias.shape[1] > bias.shape[0] else 1
+            poly_model = models.Polynomial1D(3)
+            of = fitting.LinearLSQFitter()
+            oscan = np.median(bias, axis=axis)
+            yarr = np.arange(len(oscan))
+            oscan = of(poly_model, yarr, oscan)
+            oscan = oscan(yarr)
+            if axis == 1:
+                oscan = np.reshape(oscan, (oscan.size, 1))
+            else:
+                oscan = np.reshape(oscan, (1, oscan.size))
+
+            trimmed_hdul[i].data = data - oscan
+            del hdul[i].header['DATASEC']
+            del hdul[i].header['BIASSEC']
+        elif secs is not None:
+            dataslice = secs
+            trimmed_hdul[i].data = hdul[i].data[dataslice]
+            del hdul[i].header['DATASEC']
     return trimmed_hdul
 
 
@@ -381,7 +435,7 @@ def imcombine_extraops(*args, bias=False, dark=False,
     with exception of bias, normalize, dark, and date.
 
     This function assumes all files in imcombine are of the same binning,
-    and dimensions.
+    and dimensions. It also applies overscan subtraction by default.
 
     :param bias:
     :param dark:
@@ -400,7 +454,7 @@ def imcombine_extraops(*args, bias=False, dark=False,
 
     log('Stacking data!')
     start = time.time()
-    # Stack data to get median/mean across images for extension-i
+    # Stack data to get median across images for extension-i
     if len(im_list) > 100:
         # shuffle images; we'll need this in case the limit of opened files is reached
         random.shuffle(im_list)
@@ -422,8 +476,11 @@ def imcombine_extraops(*args, bias=False, dark=False,
     if end > 5.:
         log('Data stacking took %.3f secs' % end)
 
+    # Trim image and apply overscan subtraction if supported.
+    images = [overscan_sub(hdul) for hdul in images]
+
     bins = 1 if 'CASSINI' in im_list[0] else find_val(images[0], "bin")
-    ndims = find_dimensions(im_list[0])
+    ndims = find_dimensions(images[0])
 
     if bias:
         log('Subtracting bias frame')
@@ -546,8 +603,12 @@ def imcombine(images_list: list, root_dir=None, this_type="",
         del data_list[:]
         collect()
 
-    if 'FLAT' in this_type.upper():
-        template_hdul.interpolate()
+    # if 'FLAT' in this_type.upper():
+    #     # flat tends to have negative values that (may) impact badly...
+    #     # results may vary!!!
+    #     template_hdul.interpolate()
+
+    template_hdul.remove_negs()
     template_hdul.writeto(combine_path, overwrite=True)
     template_hdul.close()
     return combine_path
@@ -724,7 +785,7 @@ def arguments_bd(kind, cals_tree, combs_tree, calpath):
                 yield imgs, kind + '.BIN%d.%s' % (bins, date), save_dir
 
 
-def update_calibrations(telescope, method='median', processes=4):
+def update_calibrations(telescope, method='median', processes=5):
     """
     Perform combination of calibration files; bias, flats, darks
     A combination of calibration files is performed per date.
@@ -755,10 +816,12 @@ def update_calibrations(telescope, method='median', processes=4):
     # check if there are bias, if so perform combinations for bias per date
     if 'BIAS' in cals_tree:
         log('Performing combinations for bias files per date')
+        partial_imcombine = partial(imcombine_extraops, bias=False, dark=False,
+                                    normalize=False, telescop=telescope)
         # initialize multiprocessing pool in context manager
         with Pool(processes=processes) as pool:
             args_gen = arg_wrapper('Bias', cals_tree, combs_tree, cals)
-            pool.starmap(imcombine, args_gen)
+            pool.starmap(partial_imcombine, args_gen)
 
     # check if there are darks, if so perform combinations for darks per date
     dark_flag = 'DARK' in cals_tree and len(cals_tree['DARK']) > 0
