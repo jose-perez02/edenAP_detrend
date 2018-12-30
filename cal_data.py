@@ -626,7 +626,6 @@ def imcombine(images_list: list, root_dir=None, this_type="",
     #     # results may vary!!!
     #     template_hdul.interpolate()
 
-    template_hdul.remove_negs()
     template_hdul.writeto(combine_path, overwrite=True)
     template_hdul.close()
     return combine_path
