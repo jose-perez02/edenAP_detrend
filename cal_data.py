@@ -310,7 +310,7 @@ def get_secs(hdu: fits.ImageHDU):
         return dataslice, biasslice
 
 
-def overscan_sub(hdul):
+def overscan_sub(hdul) -> ModHDUList:
     """
     Subtract overscan region of frame
     """
@@ -992,7 +992,7 @@ def last_processing2(obj, beta, flats_median, darks_median, bias_median, final_d
     this_filename = "Calibrated_" + filename
     log("Calibrating object frame: %s" % filename)
     save_to_path = join(final_dir, this_filename)
-    obj_image = ModHDUList(obj)
+    obj_image = overscan_sub(ModHDUList(obj))
     exts = len(bias_median)
     super_bias = [None if bias_median[i] is None else bias_median[i] + darks_median[i]*beta for i in range(exts)]
     final_image = (obj_image - super_bias) / flats_median
