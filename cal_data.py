@@ -266,11 +266,13 @@ def get_header(filename_hdu, ext=0):
     return header
 
 
-def get_secs(hdu: fits.ImageHDU):
+def get_secs(hdu: fits.ImageHDU, as_ref=False):
     # Return BIASSEC & DATASEC as numpy index.
     # Return DATASEC ONLY if BIASSEC doesn't exist.
     # Return None if neither keyword is found
     hdr = hdu.header
+    naxis1 = find_val(hdr, 'NAXIS1')
+    naxis2 = find_val(hdr, 'NAXIS2')
     if 'BIASSEC' in hdr:
         biassec = hdr['BIASSEC'].replace(':', ',').strip('][').split(',')
     else:
@@ -281,23 +283,42 @@ def get_secs(hdu: fits.ImageHDU):
     else:
         datasec = None
 
+    # If neither exist, return None
     if not datasec and not biassec:
         return None
     elif datasec and not biassec:
+        # FITS slice format -> Numpy slice format
         x1, x2, y1, y2 = [int(c) for c in datasec]
         x1, y1 = x1 - 1, y1 - 1
-        if y2 < y1 or x2 < x1:
-            # Indicates CAHA/CASSINI-LIKE FORMAT
+
+        # This indicates CAHA/CASSINI-LIKE FORMAT
+        if y2 < y1 or x2 < x1 or x1 == x2:
             x1, y1, x2, y2 = [int(c) for c in datasec]
-        return np.s_[y1:y2, x1:x2]
+
+        # This indicates the slice is actually the whole image!
+        whole_im = y2 - y1 == naxis2 and x2 - x1 == naxis1
+
+        if not as_ref and whole_im:
+            return np.s_[:, :]
+        else:
+            return np.s_[y1:y2, x1:x2]
     else:
         # Both exist!
         x1, x2, y1, y2 = [int(c) for c in datasec]
         x1, y1 = x1 - 1, y1 - 1
+
+        # Indicates CAHA/CASSINI-LIKE FORMAT
         if y2 < y1 or x2 < x1:
-            # Indicates CAHA/CASSINI-LIKE FORMAT
             x1, y1, x2, y2 = [int(c) for c in datasec]
 
+        # This indicates the slice is actually the whole image!
+        whole_im = y2 - y1 == naxis2 and x2 - x1 == naxis1
+
+        # If dataslice is the whole image then there can't be bias, return!
+        if not as_ref and whole_im:
+            return np.s_[:, :]
+
+        # At this point I assume both dataslice and biaslice will be non-zero slices.
         dataslice = np.s_[y1:y2, x1:x2]
 
         x1, x2, y1, y2 = [int(c) for c in biassec]
@@ -321,7 +342,7 @@ def overscan_sub(hdul) -> ModHDUList:
         if hdul[i].data is None:
             continue
         secs = get_secs(hdul[i])
-        if isinstance(secs, tuple):
+        if isinstance(secs, tuple) and isinstance(secs[0], tuple):
             dataslice, biasslice = secs
             data = hdul[i].data[dataslice]
             bias = hdul[i].data[biasslice]
@@ -338,12 +359,9 @@ def overscan_sub(hdul) -> ModHDUList:
                 oscan = np.reshape(oscan, (1, oscan.size))
 
             trimmed_hdul[i].data = data - oscan
-            del hdul[i].header['DATASEC']
-            del hdul[i].header['BIASSEC']
-        elif secs is not None:
+        elif secs is not None and secs != np.s_[:, :]:
             dataslice = secs
             trimmed_hdul[i].data = hdul[i].data[dataslice]
-            del hdul[i].header['DATASEC']
     return trimmed_hdul
 
 
@@ -907,22 +925,26 @@ def find_calibrations(calibrations, filters, bins, central_flag, recycle=False, 
 def trim_reference_image(image, image2) -> ModHDUList:
     """
     Trim HDUList (image) according to reference window of other HDUList (image2)
-    Uses following range format to trim image:
-    DATASEC = [X1, Y1, X2, Y2]
     :param image: Image to be trimmed: HDUList
     :param image2: Image to use for reference trim section; HDUList
     :returns new_image: New HDUList of trimmed image(s)
     """
+    # Make sure these are ModHDULists
+    image = ModHDUList(image)
+    image2 = ModHDUList(image2)
+
     # copy the HDUList
     new_image = image.copy()
     for i in range(len(image)):
         if image[i].data is None:
             continue
-        # copy the hdu
-        new_hdu = image[i].copy()
-        x1, y1, x2, y2 = eval(image2[i].header['DATASEC'])
-        new_hdu.data = new_hdu.data[y1:y2, x1:x2]
-        new_image[i] = new_hdu
+        secs = get_secs(image2[i], as_ref=True)
+
+        if secs is None:
+            continue
+        else:
+            slc = secs if isinstance(secs[0], slice) else secs[0]
+            new_image[i].data = image[i].data[slc]
     return new_image
 
 
@@ -977,14 +999,14 @@ def verify_window(filepath, *args) -> (list, tuple):
         return args
 
 
-def last_processing2(obj, beta, flats_median, darks_median, bias_median, final_dir):
+def last_processing(obj, beta, flats_median, darks_median, bias_median, final_dir):
     """
     New processing for images. Now instead of trying to reopen the FITS files in every 'process'
     :param obj: file path to object frame
     :param beta: normalizing value for dark frames ==>  OBJ_EXPTIME / DARK_EXPTIME
-    :param flats_median: list of data attributes of super flats image ==> [data0, data1, data2]
-    :param darks_median: list of data attributes of super darks image ==> [data0, data1, data2]
-    :param bias_median: list of data attributes of super bias image ==> [data0, data1, data2]
+    :param flats_median:
+    :param darks_median:
+    :param bias_median:
     :param final_dir:
     :return:
     """
@@ -992,13 +1014,19 @@ def last_processing2(obj, beta, flats_median, darks_median, bias_median, final_d
     this_filename = "Calibrated_" + filename
     log("Calibrating object frame: %s" % filename)
     save_to_path = join(final_dir, this_filename)
+    # Proceed with calibration!
     obj_image = overscan_sub(ModHDUList(obj))
-    exts = len(bias_median)
-    super_bias = [None if bias_median[i] is None else bias_median[i] + darks_median[i]*beta for i in range(exts)]
-    final_image = (obj_image - super_bias) / flats_median
-    # RIGHT BEFORE SAVING, MUST DO COSMIC RAY REMOVAL...
+
+    # Trim images as needed; if dimensios of obj_image are the same as calibrations, then nothing changes
+    bias_im = trim_reference_image(bias_median, obj_image)
+    if darks_median:
+        super_bias = bias_im + trim_reference_image(darks_median, obj_image) * beta
+    else:
+        super_bias = bias_im
+
+    final_image = (obj_image - super_bias) / trim_reference_image(flats_median, obj_image)
+    # Perform cosmic ray removal...
     final_image = cosmic_ray(final_image)
-    # INTERPOLATE RIGHT BEFORE SAVING
     # try to get rid of infs/nans/zeroes
     final_image.interpolate()
     final_image[0].header.add_history("Calibrated Image: Bias subtracted, Flattened, and Cosmic Ray Cleansed")
@@ -1037,4 +1065,16 @@ def cosmic_ray(hdul):
         hdul[i].data = newdata / gains[amp_count]
         amp_count += 1
     hdul[0].header.add_history('LaPlacian Cosmic Ray removal algorithm applied')
+    hdul[0].header.add_history(f'Read Noise used: {rdnoises}')
+    hdul[0].header.add_history(f'Gain used: {gains}')
     return hdul
+
+
+if __name__ == '__main__':
+    sample = join(server_destination, 'RAW/CAHA/LP_412-31/2018-09-22/MPIA_0220.fits')
+    bias = join(server_destination, 'Calibrations/CAHA/BIAS/2018-09-22/MPIA_0013.fits')
+
+    hdul = ModHDUList(sample)
+    bias_im = ModHDUList(bias)
+
+    slcs = get_secs(hdul[0])
