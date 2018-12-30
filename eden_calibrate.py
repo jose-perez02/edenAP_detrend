@@ -10,9 +10,9 @@ from astropy.io import fits
 from astropy.time import Time
 
 from DirSearch_Functions import search_all_fits
-from cal_data import filter_objects, find_val, prepare_cal, last_processing2
+from cal_data import filter_objects, find_val, last_processing
 from cal_data import update_calibrations, get_best_comb, get_comp_info
-from constants import log, ModHDUList
+from constants import log
 from dirs_mgmt import validate_dirs
 
 #
@@ -101,9 +101,13 @@ def eden_calibrate(telescope, datafolder, comp_info=None, starter=True):
     # Get calibration folders from closest day
     bias_median, flats_median, darks_median = get_best_comb(telescope, date, 'BIAS', 'FLAT', 'DARK',
                                                             filt=filters, bins=bins, ret_none=True)
+
+    assert bias_median, 'No compatible combined bias calibration file was found!'
+    assert flats_median, 'No compatible combined flats calibration file was found!'
+
     # Get exptime for dark frame
-    EXP = 'EXPOSURE' if 'EXPOSURE' in fits.getheader(darks_median) else 'EXPTIME'
-    exptime_dark = find_val(darks_median, EXP)
+    EXP = 'EXPOSURE' if 'EXPOSURE' in fits.getheader(bias_median) else 'EXPTIME'
+    exptime_dark = None if not darks_median else find_val(darks_median, EXP)
 
     # Setup object files for calibration
     final_dir = datafolder.replace('RAW', 'CALIBRATED')
@@ -130,37 +134,24 @@ def eden_calibrate(telescope, datafolder, comp_info=None, starter=True):
                 continue
 
     # beta variable is to be multiplied by the corrected_darks to normalize it in respect to obj files
-    betas = [find_val(objs, EXP) / exptime_dark for objs in filtered]
-
-    t0 = time.time()
-    # set up calibration files to pickle through multiprocessing
-    normflats = ModHDUList(flats_median)
-    medbias = ModHDUList(bias_median)
-    if darks_median:
-        meddark = ModHDUList(darks_median)
-        _list = [normflats, meddark, medbias]
-        normflats, meddark, medbias = prepare_cal(filtered[0], *_list)
+    if exptime_dark:
+        betas = [find_val(objs, EXP) / exptime_dark for objs in filtered]
     else:
-        _list = [normflats, medbias]
-        normflats, medbias = prepare_cal(filtered[0], *_list)
-        meddark = [None if normflats[i] is None else np.zeros(normflats[i].shape) for i in range(len(normflats))]
-
-    lapse = time.time() - t0
-    log("Preparation right before calibration took %.4f " % lapse)
+        betas = np.zeros(len(filtered))
 
     # Create arguments list/iterator for last_processing function!
     arguments = []
     for obj, beta in zip(filtered, betas):
         # each 'argument_list' will have an object frame, beta, path files to combined calibration files,
         # and final directory for calibrated frames.
-        arguments.append((obj, beta, normflats, meddark, medbias, final_dir))
+        arguments.append((obj, beta, flats_median, darks_median, bias_median, final_dir))
 
     # initialize multiprocessing pool in try/except block in order to avoid problems
     split = 4  # number of subprocesses
     pool = Pool(processes=split)
     try:
         t0 = time.time()
-        pool.starmap(last_processing2, arguments)
+        pool.starmap(last_processing, arguments)
         lapse = time.time() - t0
         log("WHOLE CALIBRATION PROCESS IN ALL FILES TOOK %.4f" % lapse)
     except Exception:
@@ -176,4 +167,4 @@ def eden_calibrate(telescope, datafolder, comp_info=None, starter=True):
 
 
 if __name__ == '__main__':
-    eden_calibrate('VATT', "/home/rayzote/EDEN/TestServer/RAW/VATT/LP_326-21/2018-03-18")
+    eden_calibrate('VATT', "/home/rayzote/EDEN/TestServer/RAW/VATT/2MUCD20263/2018-12-18")
