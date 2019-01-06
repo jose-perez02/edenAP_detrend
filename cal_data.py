@@ -1,8 +1,8 @@
 import fnmatch
 import random
+import sys
 import time
 from functools import partial
-from gc import collect
 from multiprocessing import Pool
 from os.path import join, isdir, isfile, dirname, basename
 
@@ -13,152 +13,13 @@ from ccdproc import cosmicray_lacosmic
 from dateutil.parser import parse
 
 from DirSearch_Functions import search_all_fits
-from constants import log, ModHDUList, natural_keys, todays_date, get_date, find_dates, find_val, get_calibrations
+from constants import log, ModHDUList, natural_keys, find_dates, find_val, get_calibrations
 from constants import server_destination, find_dimensions, filter_fits
 from dirs_mgmt import validate_dirs
 
-todays_day = lambda: todays_date.date
-
-
-def get_gain_rdnoise(calibration, bins=2, filters=None, twi_flat=False, limit=75, debug=False):
-    """
-    Get gain and read noise using files in calibration folder. Using selected
-    bin # data, and filters.
-    """
-    if debug:
-        log('executed get_gain_rdnoise!')
-    bias = []
-    append_bias = bias.append
-    flats = []
-    append_flats = flats.append
-    medbias_path = None
-    if not filters:
-        return None
-    if debug:
-        log('finding calibrations files for bin={}, filter={}'.format(bins,
-                                                                      filters))
-
-    for filepath in search_all_fits(calibration):
-        filename = basename(filepath)
-        this_imagetype = find_imgtype(filepath)
-        if not check_comp(filepath, bins):
-            continue
-        # avoid all median/mean files, except bias
-        if 'MEDIAN' in filename or 'MEAN' in filename.upper():
-            if "BIAS" in filename.upper():
-                medbias_path = filepath
-            continue
-        if "BIAS" == this_imagetype or "ZERO" == this_imagetype:
-            append_bias(filepath)
-            continue
-        elif "FLAT" == this_imagetype:
-            if check_comp(filepath, filters, twi_flat):
-                append_flats(filepath)
-            continue
-
-    # limit search
-    assert bias and flats, "Either bias or flats files were not detected."
-
-    if debug:
-        log('Found bias and flats!\n\tFlats: {}\n\tBias:{}'.format(len(flats), len(bias)))
-
-    # limit the amount of data
-    # if more than ~limit bias, use latest limit
-    if debug:
-        log('limiting data!')
-    if len(bias) > limit:
-        # draw random sample of files, if too many
-        if len(bias) > 3 * limit:
-            bias = random.sample(bias, 3 * limit)
-        # get dates of all bias
-        # tuples (date, bias)
-        tlist = {(get_date(b), b) for b in bias}
-        # sort by date (ascending order)
-        tlist = sorted(tlist, key=lambda x: x[0], reverse=True)
-        # now get latest limit files
-        bias = [*zip(*tlist[-limit:])][1]
-
-    if len(flats) > limit:
-        # draw random sample of files, if too many
-        if len(flats) > 3 * limit:
-            flats = random.sample(flats, 3 * limit)
-        # get dates of all flats
-        # tuples (date, flat)
-        tlist = {(get_date(flat), flat) for flat in flats}
-        # sort by date (ascending order)
-        tlist = sorted(tlist, key=lambda x: x[0], reverse=True)
-        # now get latest 'limit' files
-        flats = [*zip(*tlist[-limit:])][1]
-
-    # now we must filter out data that is trimmed
-    idx = 1 if ModHDUList(bias[0])[0].data is None else 0
-
-    # apply to bias frames
-    shapes = sorted([ModHDUList(image)[idx].data.shape for image in bias])
-    equal_shapes = [shapes[0] == ishape for ishape in shapes]
-    diff_shapes = not all(equal_shapes)
-    if diff_shapes:
-        if debug:
-            log('bias frames contain images with diff dimensions!. Correcting...')
-        the_shape = sorted(shapes)[-1]
-        bias = [image for image in bias if ModHDUList(image)[idx].data.shape == the_shape]
-
-    # apply to flats frames
-    shapes = sorted([ModHDUList(image)[idx].data.shape for image in flats])
-    equal_shapes = [shapes[0] == ishape for ishape in shapes]
-    diff_shapes = not all(equal_shapes)
-    if diff_shapes:
-        log('flats frames contain images with diff dimensions!. Correcting...')
-        the_shape = sorted(shapes)[-1]
-        flats = [image for image in flats if ModHDUList(image)[idx].data.shape == the_shape]
-
-    if debug:
-        log('sorting bias images')
-    # sort bias by sigma (ascending order)
-    bias = sorted(bias, key=lambda x: overscan_sub(x).std())
-
-    # we need to account for bias noise in flats
-    if not medbias_path:
-        medbias_path = imcombine(bias, this_type='Bias')
-    medbias = ModHDUList(medbias_path)
-
-    # helper lambda function to get bias-subtracted flats
-    def bias_sub(flat):
-        return ModHDUList(flat) - medbias
-
-    if debug:
-        log('sorting flats images')
-    # sort flats by sigma (ascending order)
-    flats = sorted(flats, key=lambda x: overscan_sub(bias_sub(x)).std())
-
-    if debug:
-        log('Top Bias Images: {}'.format(bias[:2]))
-        log('Top Bias Images\' dates: {}, {}'.format(get_date(bias[0]), get_date(bias[1])))
-        log('Top Bias STD: {:.3f}, {:.3f}'.format(overscan_sub(bias[0]).std(), overscan_sub(bias[1]).std()))
-        log('Top Flats Images: {}'.format(flats[:2]))
-        log('Top Flats Images\' dates: {}, {}'.format(get_date(flats[0]), get_date(flats[1])))
-        log('Top Flats STD: {:.3f}, {:.3f}'.format(overscan_sub(flats[0]).std(), overscan_sub(flats[1]).std()))
-
-    # get two images with lowest sigmas
-    bias1, bias2 = ModHDUList(bias[0]), ModHDUList(bias[1])
-    flat1, flat2 = ModHDUList(flats[0]), ModHDUList(flats[1])
-
-    log('Applying final calculations!')
-    # We must collect up all readnoise/gain per amplifier, store them in 'gains' and 'read_noises' in order
-    # read_noises are read noises in units of ADU
-    bias_diff: ModHDUList = bias1 - bias2
-    read_noises = bias_diff.std(extension_wise=True) / np.sqrt(2)
-    log("READ_NOISES:\t{} ADU".format(read_noises))
-    # Now we get the gain using the flats
-    normflat = flat2.flatten()
-    normflat.interpolate()
-    flatcorr: ModHDUList = flat1 / normflat
-    flatcorr_means = flatcorr.mean(extension_wise=True)
-    flatcorr_stds = flatcorr.std(extension_wise=True)
-    # normalize the mean by photon noise and read noise
-    gains = flatcorr_means / (0.5 * flatcorr_stds ** 2 - read_noises ** 2)
-    read_noises_e = gains * read_noises
-    return gains, read_noises_e
+# Fitter/Models
+_of = fitting.LinearLSQFitter()
+poly_model = models.Polynomial1D(3)
 
 
 def find_imgtype(filepath_header, filename=None, ext=0, median_opt=False):
@@ -342,24 +203,21 @@ def overscan_sub(hdul) -> ModHDUList:
         if hdul[i].data is None:
             continue
         secs = get_secs(hdul[i])
-        if isinstance(secs, tuple) and isinstance(secs[0], tuple):
+        if isinstance(secs[0], tuple):
             dataslice, biasslice = secs
-            data = hdul[i].data[dataslice]
             bias = hdul[i].data[biasslice]
             axis = 0 if bias.shape[1] > bias.shape[0] else 1
-            poly_model = models.Polynomial1D(3)
-            of = fitting.LinearLSQFitter()
-            oscan = np.median(bias, axis=axis)
+            oscan = np.median(bias, axis=axis, overwrite_input=True)
             yarr = np.arange(len(oscan))
-            oscan = of(poly_model, yarr, oscan)
+            # noinspection PyTypeChecker
+            oscan = _of(poly_model, yarr, oscan)
             oscan = oscan(yarr)
             if axis == 1:
                 oscan = np.reshape(oscan, (oscan.size, 1))
             else:
                 oscan = np.reshape(oscan, (1, oscan.size))
-
-            trimmed_hdul[i].data = data - oscan
-        elif secs is not None and secs != np.s_[:, :]:
+            trimmed_hdul[i].data = hdul[i].data[dataslice] - oscan
+        elif secs and secs != np.s_[:, :]:
             dataslice = secs
             trimmed_hdul[i].data = hdul[i].data[dataslice]
     return trimmed_hdul
@@ -1045,7 +903,7 @@ def cosmic_ray(hdul):
     gains = find_gain(hdul[0].header, num_amps)
     rdnoises = find_rdnoise(hdul[0].header, num_amps)
     kwargs = {'sigclip': 4.5, 'objlim': 6, 'gain': 2., 'readnoise': 6.,
-              'sepmed': True, 'cleantype': "idw", "verbose": True}
+              'sepmed': True, 'cleantype': "idw", "verbose": False}
     if gains is None:
         gains = np.ones(num_amps) * 2.
     if rdnoises is None:
