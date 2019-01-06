@@ -303,84 +303,137 @@ def get_best_comb(telescope: str, date: str, *kinds, bins=None,
         return cals
 
 
-def imcombine_extraops(*args, bias=False, dark=False,
-                       normalize=False, telescop=None):
+def _imcombine_help(im_list):
     """
-    This is a utility function that allows combination of images, while
-    applying extra operations. Most arguments are passed to `imcombine`
-    with exception of bias, normalize, dark, and date.
-
-    This function assumes all files in imcombine are of the same binning,
-    and dimensions. It also applies overscan subtraction by default.
-
-    :param bias:
-    :param dark:
-    :param normalize:
-    :param telescop:
-    :param args: arguments passed to imcombine in the same order
+    Helper function that aids the imcombine functions for the calibration images.
+    :param im_list: list of FITS path files
     """
-    log('\nStarting imcombine_extraops')
-    args = list(args)
-    im_list = args[0]
-    assert isinstance(im_list, list), 'Unexpected first positional argument'
-    log('SAMPLE IMAGE INPUT: %s' % im_list[0])
-
     # Find date for which to we're getting data
     date = find_dates(im_list[0])[0]
 
     log('Stacking data!')
     start = time.time()
-    # Stack data to get median across images for extension-i
-    if len(im_list) > 100:
-        # shuffle images; we'll need this in case the limit of opened files is reached
-        random.shuffle(im_list)
-        log('USING MEMMAP=FALSE and LAZY_LOAD=FALSE for im_list of %d elements' % len(im_list))
-        images = []
-        for i in range(len(im_list)):
-            try:
-                images.append(ModHDUList(im_list[i], memmap=False, lazy_load_hdus=False))
-            except OSError:
-                log('Number of opened files exceeded, max files opened: %d' % (i + 1))
-                log('Data set sample: %s' % im_list[0])
-                log('Continuing with limited shuffled list of images!')
-                # Grab up to -2 in order to allow bias/dark to open up!
-                images = images[:-2]
-                break
-    else:
-        images = [ModHDUList(im) for im in im_list]
+    # Trim image and apply overscan subtraction if supported.
+    images = [overscan_sub(ModHDUList(im, in_mmem=True)) for im in im_list]
     end = time.time() - start
     if end > 5.:
         log('Data stacking took %.3f secs' % end)
 
-    # Trim image and apply overscan subtraction if supported.
-    images = [overscan_sub(hdul) for hdul in images]
-
+    # We assume binning and dimensions are the same across images.
     bins = 1 if 'CASSINI' in im_list[0] else find_val(images[0], "bin")
     ndims = find_dimensions(images[0])
+    return images, date, bins, ndims
 
-    if bias:
+
+def _normalize_exptimes(images, all_exptime=None) -> list:
+    """
+    Function that will normalize all given images using a randomly chosen exposure time from the list.
+    This will only be done if images do vary in time exposure.
+    :param images: list of ModHDULists
+    :return: list of normalized ModHDULists
+    """
+    if not all_exptime:
+        all_exptime = [find_val(im, 'exptime') for im in images]
+    if len(set(all_exptime)) > 1:
+        log("Exposure time of darks varies, applying normalizing method")
+        exptime = random.choice(all_exptime)
+
+        def normalize(im, exptimed):
+            im[0].header['EXPTIME'] = exptime
+            return im * exptime / exptimed
+
+        images = [normalize(im, exptimed) for im, exptimed in zip(images, all_exptime)]
+    return images
+
+
+def imcombine_bias(*args):
+    log('\nStarting imcombine_darks')
+    im_list = args[0]
+    assert isinstance(im_list, list), 'Unexpected first positional argument: %r' % im_list
+    log('SAMPLE IMAGE INPUT: %s' % im_list[0])
+
+    log('Stacking data!')
+    start = time.time()
+    # Trim image and apply overscan subtraction if supported.
+    images = [overscan_sub(ModHDUList(im, in_mmem=True)) for im in im_list]
+    end = time.time() - start
+    if end > 5.:
+        log('Data stacking took %.3f secs' % end)
+
+    # Modify args accordingly
+    args = (images,) + args[1:]
+
+    return imcombine(*args)
+
+
+def imcombine_darks(*args, telescop=None):
+    log('\nStarting imcombine_darks')
+    im_list = args[0]
+    assert isinstance(im_list, list), 'Unexpected first positional argument: %r' % im_list
+    log('SAMPLE IMAGE INPUT: %s' % im_list[0])
+
+    images, date, bins, ndims = _imcombine_help(im_list)
+
+    log('Subtracting bias frame')
+    bias_im = get_best_comb(telescop, date, 'BIAS', bins=bins, ndims=ndims)
+    log('Best BIAS frame found %s' % bias_im)
+    bias_hdul = ModHDUList(bias_im)
+    images = [hdul - bias_hdul for hdul in images]
+
+    # As last step, normalize (if needed) all images to a exposure time; Making sure we combine equivalent darks
+    images = _normalize_exptimes(images)
+
+    # Modify args accordingly
+    args = (images,) + args[1:]
+
+    return imcombine(*args)
+
+
+def imcombine_flats(*args, telescop=None, darks=False):
+    log('\nStarting imcombine_darks')
+    im_list = args[0]
+    assert isinstance(im_list, list), 'Unexpected first positional argument: %r' % im_list
+    log('SAMPLE IMAGE INPUT: %s' % im_list[0])
+
+    images, date, bins, ndims = _imcombine_help(im_list)
+    all_exptime = [find_val(im, 'exptime') for im in images]
+    multi_exptime = len(set(all_exptime)) > 1
+
+    if darks:
+        log('Subtracting bias/dark frame')
+        bias_im, dark_im = get_best_comb(telescop, date, 'BIAS', 'DARK', bins=bins, ndims=ndims)
+        log('Best BIAS frame found %s' % bias_im)
+        log('Best DARK frame found %s' % dark_im)
+        bias_hdul = ModHDUList(bias_im)
+        dark_hdul = ModHDUList(dark_im)
+
+        exptime_dark = float(find_val(dark_hdul, 'exptime'))
+        # Now we must make sure that dark_hdul has same exposure time as all flat images
+        if multi_exptime:
+            images = [(im - bias_hdul - dark_hdul * exptime / exptime_dark) for im, exptime in zip(images, all_exptime)]
+        else:
+            exptime = random.choice(all_exptime)
+            super_bias = bias_hdul - dark_hdul * exptime / exptime_dark
+            images = [im - super_bias for im in images]
+        print(f'Reference count for dark_hdul: %r ' % sys.getrefcount(dark_hdul))
+
+    else:
         log('Subtracting bias frame')
-        assert telescop is not None, 'Not a date given'
         bias_im = get_best_comb(telescop, date, 'BIAS', bins=bins, ndims=ndims)
         log('Best BIAS frame found %s' % bias_im)
         bias_hdul = ModHDUList(bias_im)
         images = [hdul - bias_hdul for hdul in images]
 
-    if dark:
-        log('Subtracting dark frame')
-        assert telescop is not None, 'Not a date given'
-        dark_im = get_best_comb(telescop, date, 'DARK', bins=bins, ndims=ndims)
-        log('Best DARK frame found %s' % dark_im)
-        dark_hdul = ModHDUList(dark_im)
-        # DUE TO PRIOR COMPLICATIONS: Only apply dark substraction if values in dark image are positive (real)
-        if dark_hdul.mean() > 0:
-            images = [hdul - dark_hdul for hdul in images]
+    print(f'Reference count for bias_hdul: %r' % sys.getrefcount(bias_hdul))
 
-    if normalize:
-        images = [hdul.flatten() for hdul in images]
+    # Now we normalize so that we are combining images of same exposure time
+    images = _normalize_exptimes(images)
+
+    # And then we normalize them by their mean
+    images = [hdul.flatten() for hdul in images]
 
     # Modify args accordingly
-    args[0] = images
+    args = (images,) + args[1:]
 
     return imcombine(*args)
 
@@ -691,19 +744,16 @@ def update_calibrations(telescope, method='median', processes=5):
     # check if there are bias, if so perform combinations for bias per date
     if 'BIAS' in cals_tree:
         log('Performing combinations for bias files per date')
-        partial_imcombine = partial(imcombine_extraops, bias=False, dark=False,
-                                    normalize=False, telescop=telescope)
         # initialize multiprocessing pool in context manager
         with Pool(processes=processes) as pool:
             args_gen = arg_wrapper('Bias', cals_tree, combs_tree, cals)
-            pool.starmap(partial_imcombine, args_gen)
+            pool.starmap(imcombine_bias, args_gen)
 
     # check if there are darks, if so perform combinations for darks per date
     dark_flag = 'DARK' in cals_tree and len(cals_tree['DARK']) > 0
     if dark_flag:
         log('Performing combinations for darks files per date')
-        partial_imcombine = partial(imcombine_extraops, bias=True, dark=False,
-                                    normalize=False, telescop=telescope)
+        partial_imcombine = partial(imcombine_darks, telescop=telescope)
         # initialize multiprocessing pool in context manager
         with Pool(processes=processes) as pool:
             args_gen = arg_wrapper('Dark', cals_tree, combs_tree, cals)
@@ -712,8 +762,7 @@ def update_calibrations(telescope, method='median', processes=5):
     # check if there are flats, if so perform combinations for flats per date
     if 'FLAT' in cals_tree:
         log('Performing combinations for flats files per date')
-        partial_imcombine = partial(imcombine_extraops, bias=True, dark=dark_flag,
-                                    normalize=True, telescop=telescope)
+        partial_imcombine = partial(imcombine_flats, darks=dark_flag, telescop=telescope)
         # initialize multiprocessing pool in context manager
         with Pool(processes=processes) as pool:
             args_gen = arg_wrapper('Flat', cals_tree, combs_tree, cals)
