@@ -460,9 +460,6 @@ def imcombine(images_list: list, root_dir=None, this_type="",
     # make sure combine is either 'median' or 'mean'
     assert combine == 'median' or combine == 'mean', 'Incompatible parameter given for "combine" argument.'
 
-    # get number of images, and central difference function
-    central = getattr(np, combine)
-
     # find root dir for the given files (it will be used to save the mean_file)
     is_str = isinstance(images_list[-1], str)
     root_dir = dirname(images_list[-1]) if root_dir is None and is_str else root_dir
@@ -482,8 +479,8 @@ def imcombine(images_list: list, root_dir=None, this_type="",
     elif exists and overwrite:
         log('Overwriting combined image: %s' % combine_path)
 
-    # use the last image as template, assumed to be random one, or newest frame
-    template_hdul: ModHDUList = ModHDUList(images_list[-1]).copy()
+    # Use the last image as template, assumed to be random one, or newest frame
+    template_hdul = ModHDUList(images_list[-1], in_mem=True)
 
     # add history/comment that it is a mean file
     template_hdul[0].header.add_history("Combined calibration image: " + combine.upper())
@@ -506,7 +503,10 @@ def imcombine(images_list: list, root_dir=None, this_type="",
             log('Data stacking took %.3f secs' % end)
 
         try:
-            template_hdul[i].data = central(data_list, axis=0)
+            if combine == 'median':
+                template_hdul[i].data = np.median(data_list, axis=0, overwrite_input=True)
+            else:
+                template_hdul[i].data = np.mean(data_list, axis=0, dtype=np.float32)
         except ValueError as e:
             # This error can be thrown if shape mismatch; make sure this is the reason...
             if 'broadcast' not in e.args[0].lower():
@@ -527,10 +527,11 @@ def imcombine(images_list: list, root_dir=None, this_type="",
 
             # attempt again with modified images_list
             data_list = [get_data(image, i) for image in images_list]
-            template_hdul[i].data = central(data_list, axis=0)
-
-        del data_list[:]
-        collect()
+            if combine == 'median':
+                template_hdul[i].data = np.median(data_list, axis=0, overwrite_input=True)
+            else:
+                template_hdul[i].data = np.mean(data_list, axis=0, dtype=np.float32)
+        data_list = None
 
     # if 'FLAT' in this_type.upper():
     #     # flat tends to have negative values that (may) impact badly...
@@ -852,57 +853,6 @@ def trim_reference_image(image, image2) -> ModHDUList:
             slc = secs if isinstance(secs[0], slice) else secs[0]
             new_image[i].data = image[i].data[slc]
     return new_image
-
-
-def prepare_cal(filepath: str, *args) -> (list, tuple):
-    """
-    Prepare super calibration files by trimming if necessary and returning a list of their data attributes instead of
-    the HDUList objects
-    :param filepath: filepath to object file to use as reference for trimming
-    :param args: calibration files
-    :return: calibration data, one list of image data per given calibration file. returned in the same order.
-    """
-    trimmed = verify_window(filepath, *args)
-    new_args = []
-    for i in range(len(trimmed)):
-        data = []
-        for j in range(len(trimmed[i])):
-            data.append(trimmed[i][j].data)
-        new_args.append(data)
-    return new_args
-
-
-def verify_window(filepath, *args) -> (list, tuple):
-    """
-    Verify existence of windowed file and trim accordingly.
-    The  only dataset that are being trimmed is CAHA/CASSINI Data.
-
-    :param filepath: filepath/HDUList to object image which you want to use as reference windowed frame
-    :param args: ModHDUList/HDUList objects that you want to trim
-    :return: list of given objects trimmed, same order
-    """
-    window = False
-    isWindowed = False
-    if 'CAHA' in filepath:
-        # all CAHA images have the DATASEC keyword. We verify if image is windowed by seeing if section
-        # is not equal to maximum detector window [0, 0, 4096, 4112]
-        window = find_val(filepath, 'DATASEC')
-        isWindowed = eval(window) != [0, 0, 4096, 4112]
-    elif 'CASSINI' in filepath:
-        # Cassini's window verification is different due to the fact that windows are manually set
-        # therefore, not every cassini data set will have a 'DATASEC' keyword in the header
-        window = find_val(filepath, 'DATASEC', raise_err=False)
-        isWindowed = False if window is None else True
-    if window and isWindowed:
-        log("FOUND DATASEC WINDOW:\n\tFile:{}\n\tWINDOW:{}".format(basename(filepath), window))
-        ref_window = ModHDUList(filepath)
-        new_args = []
-        for i in range(len(args)):
-            new_args.append(trim_reference_image(args[i], ref_window))
-        return new_args
-    else:
-        log("IMAGE DOES NOT CONTAIN CAHA-LIKE WINDOW FRAME")
-        return args
 
 
 def last_processing(obj, beta, flats_median, darks_median, bias_median, final_dir):
