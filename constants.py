@@ -7,10 +7,11 @@ from datetime import datetime
 from glob import iglob
 
 import numpy as np
-from astropy.convolution import Gaussian2DKernel, interpolate_replace_nans, convolve_fft
+from astropy.convolution import Gaussian2DKernel, interpolate_replace_nans, convolve
 from astropy.io import fits
 from astropy.utils.exceptions import AstropyWarning
 from dateutil import parser
+from psutil import virtual_memory
 
 from dirs_mgmt import dir_tree, validate_dirs
 
@@ -20,7 +21,6 @@ _prog_dir = os.path.dirname(os.path.abspath(__file__))
 filterRegex = re.compile(r'.*\.fi?ts?')
 subRegex = re.compile(r'\.fi?ts?')
 dtpatt = re.compile(r'(\d{4}-\d{2}-\d{2})')
-
 
 # STANDARD LIST OF TELESCOPES, UPDATE WHEN NEEDED
 telescopes_list = ["VATT", "BOK", "KUIPER", "SCHULMAN", "CHAT", "CASSINI", "CAHA", "LOT", "GUFI"]
@@ -38,12 +38,12 @@ telescopes = {"GUFI": ['gufi', 'vatt_gufi'],
 bad_flags = ['BAD', 'TEST', 'RENAME', 'FOCUS', 'USELESS', 'RANDOM', 'PROVO', 'PROVA']
 
 # String, float, int types
-str_types = [str,np.str,np.str_]
-float_types = [float,np.float,np.float64,np.float_]
-int_types = [int,np.int,np.int64,np.int_]
+str_types = [str, np.str, np.str_]
+float_types = [float, np.float, np.float64, np.float_]
+int_types = [int, np.int, np.int64, np.int_]
 
 # Suppress astropy warnings
-warnings.simplefilter('ignore',category=AstropyWarning)
+warnings.simplefilter('ignore', category=AstropyWarning)
 
 # Formatting/functions for logging
 FORMAT1 = "%(message)s"
@@ -55,12 +55,12 @@ log = logging.info
 
 # This is the server destination in the current computer
 config = ConfigParser()
-config.read(edenAP_path+'/config.ini')
+config.read(edenAP_path + '/config.ini')
 server_destination = config['FOLDER OPTIONS']['server_destination']
 
 # Open filters.dat to determine the filter sets
 filter_sets = {}
-for line in open(edenAP_path+'/filters.dat','r').readlines():
+for line in open(edenAP_path + '/filters.dat', 'r').readlines():
     if line.strip() == '' or line.strip()[0] == '#': continue
     keys = line.strip().split()
     filter_sets[keys[0]] = keys
@@ -100,10 +100,6 @@ def get_telescopes():
     telescopes = [telescope_dir.split('/')[-1] for telescope_dir in telescope_dirs]
     return telescopes
 
-
-# Convenience functions
-
-# advanced function to get values from headers
 
 def shorten_path(path):
     """
@@ -227,18 +223,6 @@ def filter_fits(list_files: list) -> list:
     return list(fits_files)
 
 
-# function to validate directory paths. It creates a path if it doesn't already exist.
-def validateDirs(*paths):
-    """
-    Validate directories. Create directory tree if it doesn't exist. Any number of arguments (paths) are valid.
-    """
-    for folder_path in paths:
-        if not os.path.isdir(folder_path):
-            os.makedirs(folder_path)
-
-
-# natural sorting technique
-
 def atoi(text):
     return int(text) if text.isdigit() else text
 
@@ -252,15 +236,15 @@ def natural_keys(text):
     return [atoi(c) for c in re.split('(\d+)', text)]
 
 
-# Identifies filters by their preferred name using the filters.dat file
-# If the filter is not identified in filters.dat, just return the input
 def id_filters(filters):
+    # Identifies filters by their preferred name using the filters.dat file
+    # If the filter is not identified in filters.dat, just return the input
     if type(filters) in str_types:
         out = np.copy([filters])
     else:
         out = np.copy(filters)
     for key in filter_sets:
-        out[np.in1d(out,filter_sets[key])] = key
+        out[np.in1d(out, filter_sets[key])] = key
     if type(filters) in str_types:
         return out[0]
     else:
@@ -353,21 +337,6 @@ def get_date(hdr, ext=0):
     return date
 
 
-def check_arraylist(array_list):
-    """
-    Helper function for the ModHDUList class. This function will check if the argument is a list of arrays
-    :param array_list: any input will be check to match the above
-    :return: True only if array_list is a list of numpy arrays
-    """
-    if isinstance(array_list, list):
-        for i in range(len(array_list)):
-            if not isinstance(array_list[i], (np.ndarray, type(None))):
-                return False
-    else:
-        return False
-    return True
-
-
 def get_header(filename_hdu, ext=0):
     """
     Get header from filepath of FITS file or HDUList object.
@@ -386,36 +355,39 @@ def get_header(filename_hdu, ext=0):
 
 class ModHDUList(fits.HDUList):
     # class attribute is the kernel
-    _kernel = Gaussian2DKernel(5)
+    _kernel = Gaussian2DKernel(x_stddev=2)
 
-    def __init__(self, hdus=[], file=None, interpolate=False, **kwargs):
+    def __init__(self, hdus=[], file=None, interpolate=False, in_mem=False, **kwargs):
         """
-        This is wrapper around fits.HDUList class
+        This is wrapper around fits.HDUList class.
         This class will take all methods and properties of fits.HDUList
         while also being able to perform algebraic operations with the data of each HDU image, and
-        contains a interpolate and copy methods. Interpolate will detect any infs/nans or values less than zero and
-        interpolate them. Copy method will return a new (clone) instance of the object.
+        contains an interpolate and copy methods. Interpolate will detect any infs/nans or values less than zero and
+        interpolate them. Copy method will return shallow copy of the HDUList.
 
-        (New) This class allows algebraic operations to lists of numpy arrays as long as they are the same length as
-        the HDUList; len(hdul) == len(array_list) must be true
+        This class allows algebraic operations to lists of numpy arrays as long as they are the same length as
+        the HDUList; len(hdul) == len(array_list) must be true.
+
+        (New) in_mem parameter allows loading a FITS file into memory.
+        This also closes all 'links' to the original file.
 
         :param hdus: filepath to fits file or a fits.HDUList object
         :param interpolate: if True, instance will interpolate negative/zero values in data at construction
+        :param in_mem: If true and hdus is the filepath to FITS file, then fits file will be completely loaded to memory
         """
+        if in_mem:
+            kwargs['memmap'] = False
+            kwargs['lazy_load_hdus'] = False
         if isinstance(hdus, str):
             hdus = fits.open(hdus, **kwargs)
 
-        # validate dimensions of data; only needed a few times
-        for i in range(len(hdus)):
-            data: np.ndarray = hdus[i].data
-            if data is None:
-                continue
-            # if data is three-dimensional and first axis is equals 1 (first axis is 3rd coordinate)
-            if len(data.shape) > 2 and data.shape[0] == 1:
-                # then reshape to 2 dimensions
-                shaped_data = data.reshape((data.shape[1:]))
-                hdus[i].data = shaped_data.astype(np.float32)
+        # Get attributes and methods from fits.HDUList
         super(ModHDUList, self).__init__(hdus, file=file)
+
+        if in_mem:
+            for i in range(self.len()):
+                _ = self[i].data
+            self.close()
         if interpolate:
             self.interpolate()
 
@@ -424,7 +396,7 @@ class ModHDUList(fits.HDUList):
         interpolate zeros and negative values in data using FFT convolve function
         """
         for i in range(self.len()):
-            if self[i].data is None:
+            if not self[i].shape:
                 continue
             with np.errstate(invalid='ignore'):
                 non_finite = ~np.isfinite(self[i].data)
@@ -433,7 +405,7 @@ class ModHDUList(fits.HDUList):
                     data = self[i].data.astype(np.float32)
                     data[less_zero] = np.nan
                     data[non_finite] = np.nan
-                    data = interpolate_replace_nans(data, self._kernel, convolve=convolve_fft, allow_huge=True)
+                    data = interpolate_replace_nans(data, self._kernel, convolve=convolve)
                     self[i].data = data
 
     def len(self):
@@ -448,12 +420,13 @@ class ModHDUList(fits.HDUList):
         """
         return self.len() > 1
 
-    def copy(self):
+    def deepcopy(self):
         """
-        create a copy of the HDUList
-        :return: the copy will be a new ModHDUList object
+        Create deep copy of HDUList
+        :rtype: ModHDUList
+        :return: the shallow copy
         """
-        return ModHDUList([hdu.copy() for hdu in self])
+        return self.__deepcopy__()
 
     def sub(self, hdul):
         return self.__sub__(hdul)
@@ -467,94 +440,60 @@ class ModHDUList(fits.HDUList):
     def get_data(self, i):
         return self[i].data
 
-    def check_data(self, hdul):
-        """
-        Check data before operations are applied to it. We allow None's to be in this list because the None is usually
-        used instead for an empty data attribute.
-        :param hdul: HDUList or list of arrays representing image date
-        :return: (hdul_flag, arrays_flat) flags to decide calculation method
-        """
-        # use flags to tell whether given input is a HDUList or a list of numpy arrays
-        hdul_flag = "HDUList" in str(type(hdul))
-        arrays_flag = check_arraylist(hdul)
-        if hdul_flag or arrays_flag:
-            assert len(hdul) == self.len(), "HDULists don't have the same number of extensions"
-        return hdul_flag, arrays_flag
-
     def __sub__(self, hdul):
-        hdul_flag, arrays_flag = self.check_data(hdul)
         new_obj = self.copy()
-        for i in range(self.len()):
-            if self[i].data is None:
-                continue
-            if hdul_flag:
-                # assuming hdul is another hdul
-                hdu_data = hdul[i].data.astype(np.float32)
-                data = self[i].data.astype(np.float32) - hdu_data
-            elif arrays_flag:
-                # assuming hdul is a list of ndarrays
-                data = self[i].data.astype(np.float32) - hdul[i].astype(np.float32)
-            else:
-                # assuming hdul is a constant
-                data = self[i].data.astype(np.float32) - hdul
-            new_obj[i].data = data
+        try:
+            if len(hdul) != self.len():
+                raise ValueError('Number of data extensions must match!')
+            for i in range(self.len()):
+                if self[i].shape:
+                    new_obj[i].data = self[i].data - hdul[i].data
+        except TypeError:
+            for i in range(self.len()):
+                if self[i].shape:
+                    new_obj[i].data = self[i].data - hdul
         return new_obj
 
     def __truediv__(self, hdul):
-        hdul_flag, arrays_flag = self.check_data(hdul)
         new_obj = self.copy()
-        for i in range(self.len()):
-            if self[i].data is None:
-                continue
-            if hdul_flag:
-                # assuming hdul is another hdul
-                hdu_data = hdul[i].data.astype(np.float32)
-                data = self[i].data.astype(np.float32) / hdu_data
-            elif arrays_flag:
-                # assuming hdul is a list of ndarrays
-                data = self[i].data.astype(np.float32) / hdul[i].astype(np.float32)
-            else:
-                # assuming hdul is a constant
-                data = self[i].data.astype(np.float32) / hdul
-            new_obj[i].data = data
+        try:
+            if len(hdul) != self.len():
+                raise ValueError('Number of data extensions must match!')
+            for i in range(self.len()):
+                if self[i].shape:
+                    new_obj[i].data = self[i].data / hdul[i].data
+        except TypeError:
+            for i in range(self.len()):
+                if self[i].shape:
+                    new_obj[i].data = self[i].data / hdul
         return new_obj
 
     def __add__(self, hdul):
-        hdul_flag, arrays_flag = self.check_data(hdul)
         new_obj = self.copy()
-        for i in range(self.len()):
-            if self[i].data is None:
-                continue
-            if hdul_flag:
-                # assuming hdul is another hdul
-                hdu_data = hdul[i].data.astype(np.float32)
-                data = self[i].data.astype(np.float32) + hdu_data
-            elif arrays_flag:
-                # assuming hdul is a list of ndarrays
-                data = self[i].data.astype(np.float32) + hdul[i].astype(np.float32)
-            else:
-                # assuming hdul is a constant
-                data = self[i].data.astype(np.float32) + hdul
-            new_obj[i].data = data
+        try:
+            if len(hdul) != self.len():
+                raise ValueError('Number of data extensions must match!')
+            for i in range(self.len()):
+                if self[i].shape:
+                    new_obj[i].data = self[i].data + hdul[i].data
+        except TypeError:
+            for i in range(self.len()):
+                if self[i].shape:
+                    new_obj[i].data = self[i].data + hdul
         return new_obj
 
     def __mul__(self, hdul):
-        hdul_flag, arrays_flag = self.check_data(hdul)
         new_obj = self.copy()
-        for i in range(self.len()):
-            if self[i].data is None:
-                continue
-            if hdul_flag:
-                # assuming hdul is another hdul
-                hdu_data = hdul[i].data.astype(np.float32)
-                data = self[i].data.astype(np.float32) * hdu_data
-            elif arrays_flag:
-                # assuming hdul is a list of ndarrays
-                data = self[i].data.astype(np.float32) * hdul[i].astype(np.float32)
-            else:
-                # assuming hdul is a constant
-                data = self[i].data.astype(np.float32) * hdul
-            new_obj[i].data = data
+        try:
+            if len(hdul) != self.len():
+                raise ValueError('Number of data extensions must match!')
+            for i in range(self.len()):
+                if self[i].shape:
+                    new_obj[i].data = self[i].data * hdul[i].data
+        except TypeError:
+            for i in range(self.len()):
+                if self[i].shape:
+                    new_obj[i].data = self[i].data * hdul
         return new_obj
 
     def __radd__(self, hdul):
@@ -577,12 +516,10 @@ class ModHDUList(fits.HDUList):
         if method != 'median' and method != 'mean':
             raise ValueError('Method "{}" doesn\'t exist please enter "median" or "mean"'.format(method))
         method = getattr(np, method)
-        flatten_hdul = ModHDUList([hdu.copy() for hdu in self])
+        flatten_hdul = self.copy()
         for i in range(self.len()):
-            if self[i].data is None:
-                continue
-            data = flatten_hdul[i].data
-            flatten_hdul[i].data = data / method(self[i].data)
+            if self[i].shape:
+                flatten_hdul[i].data = self[i].data / method(self[i].data)
         flatten_hdul[0].header.add_history('FITS has been flattened by its {}'.format(method))
         return flatten_hdul
 
@@ -591,21 +528,29 @@ class ModHDUList(fits.HDUList):
         Get median of all pixels in all extensions
         """
         if extension_wise:
-            return np.array([np.nanmedian(hdu.data) for hdu in self if hdu.data is not None])
-        return np.nanmedian([hdu.data for hdu in self if hdu.data is not None])
+            return np.asarray([np.nanmedian(hdu.data) for hdu in self if hdu.shape])
+        return np.nanmedian([hdu.data for hdu in self if hdu.shape])
 
     def mean(self, extension_wise=False):
         """
         Get mean of all pixels in all extensions
         """
         if extension_wise:
-            return np.array([np.nanmean(hdu.data) for hdu in self if hdu.data is not None])
-        return np.nanmean([hdu.data for hdu in self if hdu.data is not None])
+            return np.asarray([np.nanmean(hdu.data) for hdu in self if hdu.shape])
+        return np.nanmean([hdu.data for hdu in self if hdu.shape])
 
     def std(self, extension_wise=False):
         """
         Get standard deviation of all pixels in all extensions
         """
         if extension_wise:
-            return np.array([np.nanstd(hdu.data) for hdu in self if hdu.data is not None])
-        return np.nanstd([hdu.data for hdu in self if hdu.data is not None])
+            return np.asarray([np.nanstd(hdu.data) for hdu in self if hdu.shape])
+        return np.nanstd([hdu.data for hdu in self if hdu.shape])
+
+
+if __name__ == '__main__':
+    path = '/home/rayzote/raystuff/EDEN/TestFits/bias_frames'
+    images = [os.path.join(path, im) for im in os.listdir(path)]
+    _ = imcombine(images, method='median', output_file=os.path.join(path, 'medbias_super.fits'), sigma_clip=True,
+                  sigma_clip_low_thresh=2.5, sigma_clip_high_thresh=2.5, clip_extrem=True)
+    print(_)
